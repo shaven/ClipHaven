@@ -70,6 +70,51 @@ public struct Preferences {
         set { defaults.set(min(max(newValue, 0.5), 30), forKey: "restoreDelay") }
     }
 
+    public var showIcons: Bool {
+        get { bool("showIcons", true) }
+        set { defaults.set(newValue, forKey: "showIcons") }
+    }
+
+    /// Menu icon size in points: 16, 32 or 48, as in ClipMenu. Other values snap to the nearest.
+    public var iconSize: Int {
+        get { Self.snap(defaults.object(forKey: "iconSize") as? Int ?? 16) }
+        set { defaults.set(Self.snap(newValue), forKey: "iconSize") }
+    }
+
+    public var showThumbnails: Bool {
+        get { bool("showThumbnails", true) }
+        set { defaults.set(newValue, forKey: "showThumbnails") }
+    }
+
+    public var thumbnailWidth: Int {
+        get { int("thumbnailWidth", 100, 16...256) }
+        set { defaults.set(newValue.clamped(16...256), forKey: "thumbnailWidth") }
+    }
+
+    public var thumbnailHeight: Int {
+        get { int("thumbnailHeight", 32, 16...128) }
+        set { defaults.set(newValue.clamped(16...128), forKey: "thumbnailHeight") }
+    }
+
+    /// A `StatusIconChoice.id`.
+    public var statusIcon: String {
+        get { StatusIconChoice.resolve(defaults.string(forKey: "statusIcon") ?? "").id }
+        set { defaults.set(newValue, forKey: "statusIcon") }
+    }
+
+    public var appearance: MenuAppearance {
+        var look = MenuAppearance()
+        look.showIcons = showIcons
+        look.iconSize = iconSize
+        look.showThumbnails = showThumbnails
+        look.thumbnailSize = CGSize(width: thumbnailWidth, height: thumbnailHeight)
+        return look
+    }
+
+    private static func snap(_ size: Int) -> Int {
+        [16, 32, 48].min { abs($0 - size) < abs($1 - size) }!
+    }
+
     public var layout: MenuLayout {
         var layout = MenuLayout()
         layout.inlineCount = inlineCount
@@ -85,7 +130,8 @@ public struct Preferences {
 
     public mutating func reset() {
         for key in ["autoPaste", "hotKeyCode", "hotKeyModifiers", "maxCount", "maxImageBytes", "inlineCount",
-                    "folderSize", "titleLength", "numbered", "restoreDelay"] {
+                    "folderSize", "titleLength", "numbered", "restoreDelay", "showIcons", "iconSize",
+                    "showThumbnails", "thumbnailWidth", "thumbnailHeight", "statusIcon"] {
             defaults.removeObject(forKey: key)
         }
     }

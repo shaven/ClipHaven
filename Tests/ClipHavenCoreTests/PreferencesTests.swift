@@ -1,3 +1,4 @@
+import CoreGraphics
 import XCTest
 @testable import ClipHavenCore
 
@@ -76,4 +77,42 @@ final class PreferencesTests: XCTestCase {
         XCTAssertEqual(prefs.titleLength, 20)
         XCTAssertFalse(prefs.hasCustomHotKey)
     }
+
+    func testLookDefaults() {
+        let prefs = Preferences(defaults: defaults)
+        XCTAssertTrue(prefs.showIcons)
+        XCTAssertEqual(prefs.iconSize, 16)
+        XCTAssertTrue(prefs.showThumbnails)
+        XCTAssertEqual([prefs.thumbnailWidth, prefs.thumbnailHeight], [100, 32])
+        XCTAssertEqual(prefs.statusIcon, "template")
+        let look = prefs.appearance
+        XCTAssertEqual(look.iconSize, 16)
+        XCTAssertEqual(look.thumbnailSize, CGSize(width: 100, height: 32))
+        XCTAssertTrue(look.showIcons && look.showThumbnails)
+    }
+
+    func testIconSizeSnapsToAMenuSizeAndThumbnailsClamp() {
+        var prefs = Preferences(defaults: defaults)
+        prefs.iconSize = 20
+        XCTAssertEqual(prefs.iconSize, 16)
+        prefs.iconSize = 41
+        XCTAssertEqual(prefs.iconSize, 48)
+        prefs.iconSize = 5
+        XCTAssertEqual(prefs.iconSize, 16)
+        prefs.thumbnailWidth = 9_999
+        prefs.thumbnailHeight = 1
+        XCTAssertEqual([prefs.thumbnailWidth, prefs.thumbnailHeight], [256, 16])
+    }
+
+    func testResetRestoresTheLook() {
+        var prefs = Preferences(defaults: defaults)
+        prefs.showIcons = false
+        prefs.iconSize = 48
+        prefs.statusIcon = "diagonal-color"
+        prefs.reset()
+        XCTAssertTrue(prefs.showIcons)
+        XCTAssertEqual(prefs.iconSize, 16)
+        XCTAssertEqual(prefs.statusIcon, "template")
+    }
 }
+

@@ -29,7 +29,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
     // MARK: - Window
 
     private func build() {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 380),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 470),
                               styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "ClipHaven Preferences"
         window.isReleasedWhenClosed = false
@@ -55,6 +55,10 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             [label("Title length"), number("titleLength")],
             [label("History size"), number("maxCount"), ],
             [label(""), note("Read at launch: quit and reopen ClipHaven after changing it.")],
+            [label("Menu icons"), check("showIcons", "Show icons in the menu")],
+            [label(""), check("showThumbnails", "Show thumbnails for images")],
+            [label("Icon size"), popup("iconSize", Self.iconSizes.map { "\($0) pt" })],
+            [label("Status bar icon"), popup("statusIcon", StatusIconChoice.all.map(\.title))],
             [label("Restore clipboard after"), number("restoreDelay", suffix: "seconds")],
             [label(""), check("login", "Start ClipHaven at login")],
             [label(""), loginNote],
@@ -107,6 +111,18 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         return row
     }
 
+    private static let iconSizes = [16, 32, 48]
+
+    private func popup(_ id: String, _ titles: [String]) -> NSPopUpButton {
+        let button = NSPopUpButton(frame: .zero, pullsDown: false)
+        button.addItems(withTitles: titles)
+        button.identifier = .init(id)
+        button.target = self
+        button.action = #selector(changed(_:))
+        controls[id] = button
+        return button
+    }
+
     func windowWillClose(_ notification: Notification) {
         stopRecording()
     }
@@ -117,6 +133,10 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         (controls["autoPaste"] as? NSButton)?.state = prefs.autoPaste ? .on : .off
         (controls["numbered"] as? NSButton)?.state = prefs.numbered ? .on : .off
         (controls["login"] as? NSButton)?.state = LoginItem.isEnabled ? .on : .off
+        (controls["showIcons"] as? NSButton)?.state = prefs.showIcons ? .on : .off
+        (controls["showThumbnails"] as? NSButton)?.state = prefs.showThumbnails ? .on : .off
+        (controls["iconSize"] as? NSPopUpButton)?.selectItem(at: Self.iconSizes.firstIndex(of: prefs.iconSize) ?? 0)
+        (controls["statusIcon"] as? NSPopUpButton)?.selectItem(at: StatusIconChoice.all.firstIndex { $0.id == prefs.statusIcon } ?? 0)
         controls["inlineCount"]?.integerValue = prefs.inlineCount
         controls["folderSize"]?.integerValue = prefs.folderSize
         controls["titleLength"]?.integerValue = prefs.titleLength
@@ -135,6 +155,12 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         case "titleLength": prefs.titleLength = sender.integerValue
         case "maxCount": prefs.maxCount = sender.integerValue
         case "restoreDelay": prefs.restoreDelay = sender.doubleValue
+        case "showIcons": prefs.showIcons = sender.integerValue != 0
+        case "showThumbnails": prefs.showThumbnails = sender.integerValue != 0
+        case "iconSize":
+            if let index = (sender as? NSPopUpButton)?.indexOfSelectedItem { prefs.iconSize = Self.iconSizes[index] }
+        case "statusIcon":
+            if let index = (sender as? NSPopUpButton)?.indexOfSelectedItem { prefs.statusIcon = StatusIconChoice.all[index].id }
         case "login":
             do { try LoginItem.set(sender.integerValue != 0) } catch { NSLog("ClipHaven: login item: \(error)") }
         default: break

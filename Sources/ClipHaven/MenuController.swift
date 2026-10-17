@@ -16,6 +16,11 @@ final class MenuController: NSObject, NSMenuDelegate {
     private let actionFolders: [URL]
     private lazy var editor = SnippetEditor(store: snippets, secrets: secretPaster) {}
     var layout = MenuLayout()
+    private let icons = MenuIcons()
+    var appearance: MenuAppearance {
+        get { icons.appearance }
+        set { icons.appearance = newValue }
+    }
     /// Opens the Preferences window; set by the app delegate.
     var showPreferences: () -> Void = {}
     /// Shown in the status menu, e.g. "Hotkey: ⌃⌘V".
@@ -56,13 +61,24 @@ final class MenuController: NSObject, NSMenuDelegate {
     private func fill(_ menu: NSMenu) {
         let clips = (try? store.summaries(limit: store.limits.maxCount)) ?? []
         let types = Dictionary(clips.map { ($0.id, $0.primaryType) }, uniquingKeysWith: { a, _ in a })
-        for entry in MenuModel.build(clips: clips, snippetFolders: (try? snippets.menuSummaries()) ?? [], layout: layout) {
+        let snippetFolders = (try? snippets.menuSummaries()) ?? []
+        let entries = MenuModel.build(clips: clips, snippetFolders: snippetFolders, layout: layout)
+
+        // Snippet folders come first, then a separator, then the history.
+        let historyStart = snippetFolders.count + (!snippetFolders.isEmpty && !clips.isEmpty ? 1 : 0)
+        var shortcuts = Array("1234567890").makeIterator()
+        for (index, entry) in entries.enumerated() {
+            if index == 0, !snippetFolders.isEmpty { menu.addItem(.sectionHeader(title: "Snippets")) }
+            if index == historyStart, !clips.isEmpty { menu.addItem(.sectionHeader(title: "History")) }
             switch entry {
             case .item(let item):
-                menu.addItem(menuItem(item, types: types))
+                let menuItem = menuItem(item, types: types)
+                // ⌘1 … ⌘0 choose the first ten clips, as in ClipMenu.
+                if case .clip = item.target, let key = shortcuts.next() { menuItem.keyEquivalent = String(key) }
+                menu.addItem(menuItem)
             case .folder(let title, let items):
                 let folder = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-                folder.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+                if appearance.showIcons { folder.image = icons.image(.folder) }
                 let submenu = NSMenu(title: title)
                 items.forEach { submenu.addItem(menuItem($0, types: types)) }
                 folder.submenu = submenu
@@ -76,30 +92,40 @@ final class MenuController: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
-        menu.addItem(actionItem("Clear History…", #selector(clearHistory)))
         menu.addItem(actionItem("Edit Snippets…", #selector(editSnippets)))
+        menu.addItem(actionItem("Clear History…", #selector(clearHistory)))
         menu.addItem(actionItem("Preferences…", #selector(openPreferences)))
-        menu.addItem(actionItem("Import ClipMenu Snippets…", #selector(importClipMenuSnippets)))
-        menu.addItem(actionItem("Import ClipMenu Actions…", #selector(importClipMenuActions)))
-        menu.addItem(actionItem("Open Scripts Folder", #selector(openScriptsFolder)))
-        menu.addItem(actionItem("Export…", #selector(exportAll)))
-        menu.addItem(actionItem("Import…", #selector(importAll)))
+
+        let tools = NSMenuItem(title: "Import, Export and Scripts", action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: tools.title)
+        submenu.addItem(actionItem("Import ClipMenu Snippets…", #selector(importClipMenuSnippets)))
+        submenu.addItem(actionItem("Import ClipMenu Actions…", #selector(importClipMenuActions)))
+        submenu.addItem(.separator())
+        submenu.addItem(actionItem("Export…", #selector(exportAll)))
+        submenu.addItem(actionItem("Import…", #selector(importAll)))
+        submenu.addItem(.separator())
+        submenu.addItem(actionItem("Open Scripts Folder", #selector(openScriptsFolder)))
+        tools.submenu = submenu
+        menu.addItem(tools)
+
         menu.addItem(.separator())
-        let about = NSMenuItem(title: "ClipHaven \(ClipHaven.version)", action: nil, keyEquivalent: "")
-        menu.addItem(about)
-        if let hotKeyNote { menu.addItem(NSMenuItem(title: hotKeyNote, action: nil, keyEquivalent: "")) }
+        let about = ["ClipHaven \(ClipHaven.version)", hotKeyNote].compactMap { $0 }.joined(separator: "  ·  ")
+        menu.addItem(NSMenuItem(title: about, action: nil, keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Quit ClipHaven", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
     private func menuItem(_ entry: MenuItemEntry, types: [Int64: String]) -> NSMenuItem {
         let item = actionItem(entry.title, #selector(choose(_:)))
         item.representedObject = entry.target
-        if case .clip(let id) = entry.target, let type = types[id] {
-            item.image = Self.icon(for: type)
+        var kind = MenuIconKind.snippet
+        switch entry.target {
+        case .clip(let id):
+            kind = .kind(forClipType: types[id] ?? "")
+            if kind == .image, appearance.showThumbnails { item.image = icons.thumbnail(for: id, in: store) }
+        case .snippet:
+            if entry.isLocked { kind = .lockedSnippet }
         }
-        if entry.isLocked {
-            item.image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: "Locked")
-        }
+        if item.image == nil, appearance.showIcons { item.image = icons.image(kind) }
         return item
     }
 
@@ -167,7 +193,7 @@ final class MenuController: NSObject, NSMenuDelegate {
         for node in nodes {
             if case .folder(let children) = node.kind {
                 let folder = NSMenuItem(title: node.title, action: nil, keyEquivalent: "")
-                folder.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+                folder.image = icons.image(.folder)
                 let submenu = NSMenu(title: node.title)
                 addActions(children, to: submenu, clipID: clipID)
                 folder.submenu = submenu
@@ -175,7 +201,7 @@ final class MenuController: NSObject, NSMenuDelegate {
             } else {
                 let item = actionItem(node.title, #selector(runAction(_:)))
                 item.representedObject = ActionChoice(node: node, clipID: clipID)
-                if case .script = node.kind { item.image = NSImage(systemSymbolName: "curlybraces", accessibilityDescription: nil) }
+                if case .script = node.kind { item.image = icons.image(.script) }
                 menu.addItem(item)
             }
         }

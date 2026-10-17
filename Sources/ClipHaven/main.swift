@@ -17,8 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMainMenu()
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = StatusIcon.make()
         statusItem = item
+        applyStatusIcon()
 
         do {
             let prefs = Preferences()
@@ -51,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                             actions: actions, actionStore: actionStore, scriptsFolder: scripts, actionFolders: actionFolders)
             menuController = controller
             controller.layout = prefs.layout
+            controller.appearance = prefs.appearance
             controller.showPreferences = { [weak self] in self?.showPreferences() }
             registerHotKey()
             item.menu = controller.makeStatusMenu()
@@ -113,6 +114,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferencesWindow?.show()
     }
 
+    /// ClipHaven's drawn icon, or one of ClipMenu's PNGs. Coloured ones are shown as they are;
+    /// the black ones are tinted by macOS for light and dark menu bars.
+    private func applyStatusIcon() {
+        let choice = StatusIconChoice.resolve(Preferences().statusIcon)
+        guard let file = choice.file,
+              let url = Bundle.main.resourceURL?.appendingPathComponent("StatusIcons/\(file)"),
+              let image = NSImage(contentsOf: url) else {
+            statusItem?.button?.image = StatusIcon.make()
+            return
+        }
+        image.size = NSSize(width: 18, height: 18)
+        image.isTemplate = !choice.isColour
+        image.accessibilityDescription = "ClipHaven"
+        statusItem?.button?.image = image
+    }
+
     /// Pushes the saved settings into the running app. The history size is read at launch.
     private func applyPreferences() {
         let prefs = Preferences()
@@ -120,6 +137,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         secretPaster?.autoPaste = prefs.autoPaste
         secretPaster?.restoreDelay = prefs.restoreDelay
         menuController?.layout = prefs.layout
+        menuController?.appearance = prefs.appearance
+        applyStatusIcon()
         registerHotKey()
     }
 

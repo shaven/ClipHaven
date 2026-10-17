@@ -84,7 +84,7 @@ final class PreferencesTests: XCTestCase {
         XCTAssertEqual(prefs.iconSize, 16)
         XCTAssertTrue(prefs.showThumbnails)
         XCTAssertEqual([prefs.thumbnailWidth, prefs.thumbnailHeight], [100, 32])
-        XCTAssertEqual(prefs.statusIcon, "template")
+        XCTAssertEqual(prefs.statusIcon, "colour")
         let look = prefs.appearance
         XCTAssertEqual(look.iconSize, 16)
         XCTAssertEqual(look.thumbnailSize, CGSize(width: 100, height: 32))
@@ -112,7 +112,7 @@ final class PreferencesTests: XCTestCase {
         prefs.reset()
         XCTAssertTrue(prefs.showIcons)
         XCTAssertEqual(prefs.iconSize, 16)
-        XCTAssertEqual(prefs.statusIcon, "template")
+        XCTAssertEqual(prefs.statusIcon, "colour")
     }
 }
 

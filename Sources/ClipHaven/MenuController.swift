@@ -143,6 +143,7 @@ final class MenuController: NSObject, NSMenuDelegate {
         case .clip(let id):
             kind = .kind(forClipType: types[id] ?? "")
             if kind == .image, appearance.showThumbnails { item.image = icons.thumbnail(for: id, in: store) }
+            if kind == .files, appearance.showIcons { item.image = icons.fileIcon(for: id, in: store) }
         case .snippet:
             if entry.isLocked { kind = .lockedSnippet }
         }

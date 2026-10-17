@@ -14,6 +14,14 @@ mkdir -p "$app/Contents/Resources"
 cp -R Resources/script "$app/Contents/Resources/script"
 cp -R Resources/StatusIcons "$app/Contents/Resources/StatusIcons"
 cp "$(swift build -c release --arch arm64 --show-bin-path)/ClipHaven" "$app/Contents/MacOS/ClipHaven"
+# The app icon is drawn by the app itself (one source for the menu bar and the Finder icon).
+iconset="$(mktemp -d)/ClipHaven.iconset"
+mkdir -p "$iconset" "$app/Contents/Resources"
+for size in 16 32 128 256 512; do
+    "$app/Contents/MacOS/ClipHaven" --write-icon "$iconset/icon_${size}x${size}.png" "$size" app
+    "$app/Contents/MacOS/ClipHaven" --write-icon "$iconset/icon_${size}x${size}@2x.png" "$((size * 2))" app
+done
+iconutil -c icns "$iconset" -o "$app/Contents/Resources/ClipHaven.icns"
 identity="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)}"
 # The Keychain features that need an entitlement (iCloud-synchronizable items, Keychain-enforced
 # Touch ID) work only with a provisioning profile for com.shavenconsulting.ClipHaven. Point

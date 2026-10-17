@@ -119,6 +119,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the black ones are tinted by macOS for light and dark menu bars.
     private func applyStatusIcon() {
         let choice = StatusIconChoice.resolve(Preferences().statusIcon)
+        if choice == .colour {
+            statusItem?.button?.image = ColourIcon.menuBar()
+            return
+        }
         guard let file = choice.file,
               let url = Bundle.main.resourceURL?.appendingPathComponent("StatusIcons/\(file)"),
               let image = NSImage(contentsOf: url) else {
@@ -190,6 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 HistoryImportMode.runIfRequested()
+IconMode.runIfRequested()
 
 let app = NSApplication.shared
 let delegate = AppDelegate()

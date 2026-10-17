@@ -16,6 +16,19 @@ final class MenuIconTests: XCTestCase {
         XCTAssertEqual(MenuIconKind.kind(forClipType: "com.example.unknown"), .other)
     }
 
+    func testEveryKindButFolderHasItsOwnColourSymbol() {
+        let kinds: [MenuIconKind] = [.text, .richText, .pdf, .url, .files, .image, .other, .snippet, .lockedSnippet, .action, .script]
+        let symbols = kinds.map { $0.symbol }
+        XCTAssertFalse(symbols.contains { $0 == nil || $0!.isEmpty })
+        XCTAssertEqual(Set(symbols.compactMap { $0 }).count, kinds.count, "no two kinds share a symbol")
+        XCTAssertNil(MenuIconKind.folder.symbol, "folders keep the Finder folder")
+    }
+
+    func testTheHistoryTypesAreToldApartByColour() {
+        let tints = [MenuIconKind.text, .richText, .pdf, .url, .image].map { $0.tint }
+        XCTAssertEqual(Set(tints).count, tints.count)
+    }
+
     func testAThumbnailFitsTheBoxAndKeepsItsShape() {
         let box = CGSize(width: 100, height: 32)
         XCTAssertEqual(Thumbnail.size(for: CGSize(width: 400, height: 200), within: box), CGSize(width: 64, height: 32))
@@ -34,12 +47,15 @@ final class MenuIconTests: XCTestCase {
     func testStatusIconChoicesAllShipAFileAndUnknownNamesFallBack() {
         let folder = ScriptRunnerTests.bundled.deletingLastPathComponent().appendingPathComponent("StatusIcons")
         XCTAssertEqual(StatusIconChoice.template.file, nil)
+        XCTAssertEqual(StatusIconChoice.colour.file, nil)
         for choice in StatusIconChoice.all where choice.file != nil {
             XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent(choice.file!).path), choice.title)
         }
-        XCTAssertEqual(StatusIconChoice.all.filter(\.isColour).map(\.id), ["diagonal-color", "scissors1-color", "scissors2-color"])
-        XCTAssertEqual(StatusIconChoice.resolve("nope"), .template)
-        XCTAssertEqual(StatusIconChoice.resolve(StatusIconChoice.all[1].id), StatusIconChoice.all[1])
+        XCTAssertEqual(StatusIconChoice.all.filter(\.isColour).map(\.id), ["colour", "diagonal-color", "scissors1-color", "scissors2-color"])
+        XCTAssertEqual(StatusIconChoice.default, .colour, "the coloured ClipHaven icon is the default")
+        XCTAssertEqual(StatusIconChoice.resolve("nope"), .colour)
+        XCTAssertEqual(StatusIconChoice.resolve("template"), .template)
+        XCTAssertEqual(StatusIconChoice.resolve(StatusIconChoice.all[2].id), StatusIconChoice.all[2])
         XCTAssertEqual(Set(StatusIconChoice.all.map(\.id)).count, StatusIconChoice.all.count)
     }
 }

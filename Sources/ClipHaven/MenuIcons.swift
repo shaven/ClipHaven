@@ -8,12 +8,13 @@ import UniformTypeIdentifiers
 final class MenuIcons {
     var appearance = MenuAppearance() {
         didSet {
-            if oldValue.iconSize != appearance.iconSize { icons.removeAll() }
+            if oldValue.iconSize != appearance.iconSize { icons.removeAll(); fileIcons.removeAll() }
             if oldValue.thumbnailSize != appearance.thumbnailSize { thumbnails.removeAll() }
         }
     }
     private var icons: [String: NSImage] = [:]
     private var thumbnails: [Int64: NSImage] = [:]
+    private var fileIcons: [Int64: NSImage] = [:]
 
     func image(_ kind: MenuIconKind) -> NSImage? {
         let key = "\(kind)"
@@ -24,19 +25,21 @@ final class MenuIcons {
     }
 
     private func make(_ kind: MenuIconKind) -> NSImage? {
-        switch kind {
-        case .text: finder(.plainText)
-        case .richText: finder(.rtf)
-        case .pdf: finder(.pdf)
-        case .url: finder(.internetLocation)
-        case .files: finder(.item)
-        case .image: finder(.image)
-        case .other: finder(.data)
-        case .folder: finder(.folder)
-        case .snippet: symbol("note.text", .systemYellow)
-        case .lockedSnippet: symbol("lock.fill", .systemOrange)
-        case .action: symbol("bolt.fill", .systemBlue)
-        case .script: symbol("curlybraces", .systemPurple)
+        guard let name = kind.symbol else { return finder(.folder) }
+        return symbol(name, Self.colour(kind.tint))
+    }
+
+    private static func colour(_ tint: MenuIconTint) -> NSColor {
+        switch tint {
+        case .blue: .systemBlue
+        case .orange: .systemOrange
+        case .red: .systemRed
+        case .teal: .systemTeal
+        case .green: .systemGreen
+        case .gray: .systemGray
+        case .indigo: .systemIndigo
+        case .yellow: .systemYellow
+        case .purple: .systemPurple
         }
     }
 
@@ -51,7 +54,7 @@ final class MenuIcons {
     /// A coloured symbol centred on a square canvas, so titles line up with the Finder icons.
     private func symbol(_ name: String, _ colour: NSColor) -> NSImage? {
         let config = NSImage.SymbolConfiguration(pointSize: side * 0.72, weight: .medium)
-            .applying(NSImage.SymbolConfiguration(paletteColors: [colour]))
+            .applying(NSImage.SymbolConfiguration(paletteColors: [colour, colour.withAlphaComponent(0.55)]))
         guard let glyph = NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(config) else { return nil }
         return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
             let size = glyph.size
@@ -59,6 +62,17 @@ final class MenuIcons {
                                   width: size.width, height: size.height))
             return true
         }
+    }
+
+    /// The real Finder icon of the first file in a Filenames clip, or nil if there is none.
+    func fileIcon(for id: Int64, in store: HistoryStore) -> NSImage? {
+        if let cached = fileIcons[id] { return cached }
+        guard let clip = try? store.clip(id: id), let url = ClipAction.fileURLs(of: clip.representations)?.first else { return nil }
+        let icon = NSWorkspace.shared.icon(forFile: url.path).copy() as? NSImage
+        icon?.size = NSSize(width: side, height: side)
+        if fileIcons.count > 200 { fileIcons.removeAll() }
+        fileIcons[id] = icon
+        return icon
     }
 
     /// A picture of an image clip that fits the thumbnail box, or nil if it cannot be read.

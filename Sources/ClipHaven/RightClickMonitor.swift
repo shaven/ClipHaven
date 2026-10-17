@@ -3,7 +3,9 @@ import AppKit
 @preconcurrency import CoreGraphics
 import ClipHavenCore
 
-/// Opens ClipHaven's menu when you right-click a field you can paste into.
+/// Opens ClipHaven's menu on a right-click made with the recorded modifier keys (Control for the
+/// action menu and Shift+Control for the paste menu, unless changed in Preferences). A plain
+/// right-click is left to the app.
 ///
 /// A session event tap sees each right-mouse press. If the element under the pointer is an editable
 /// text field (asked through Accessibility, with a short timeout so a slow app is simply left
@@ -12,7 +14,14 @@ import ClipHavenCore
 /// which auto-paste already needs.
 @MainActor
 final class RightClickMonitor {
-    var onRightClick: (CGPoint) -> Void = { _ in }
+    /// The click point and whether the menu opens in action mode (Control without Shift).
+    var onRightClick: (CGPoint, Bool) -> Void = { _, _ in }
+    /// The recorded gestures, read at every click so a change in Preferences applies at once.
+    var gestures: () -> (paste: RightClickModifiers, actions: RightClickModifiers) = {
+        (RightClickGesture.defaultPaste, RightClickGesture.defaultActions)
+    }
+    /// Set while Preferences is recording a gesture, so that right-click reaches the recorder.
+    var isPaused = false
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
     private var swallowingRelease = false
@@ -55,10 +64,19 @@ final class RightClickMonitor {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return Unmanaged.passUnretained(event)
         case .rightMouseDown:
+            guard !isPaused else { return Unmanaged.passUnretained(event) }
+            let chosen = gestures()
+            guard let mode = RightClickGesture.mode(for: Self.modifiers(event.flags), paste: chosen.paste, actions: chosen.actions)
+            else { return Unmanaged.passUnretained(event) }
             let point = event.location
-            guard let field = Self.editableField(at: point) else { return Unmanaged.passUnretained(event) }
+            let target = Self.element(at: point)
+            // ClipHaven's own menus and windows keep their right-clicks (the actions on a menu item).
+            if let target, target.pid == ProcessInfo.processInfo.processIdentifier { return Unmanaged.passUnretained(event) }
+            // The keys were held on purpose, so this opens whether or not the app shows a text field
+            // to Accessibility (Terminal and some browsers do not). A field is only needed to focus it.
+            let field = target.flatMap { Self.isEditable($0.element) ? $0.element : nil }
             swallowingRelease = true
-            DispatchQueue.main.async { [weak self] in self?.open(at: point, field: field) }
+            DispatchQueue.main.async { [weak self] in self?.open(at: point, field: field, actions: mode == .actions) }
             return nil
         case .rightMouseUp:
             guard swallowingRelease else { return Unmanaged.passUnretained(event) }
@@ -71,39 +89,49 @@ final class RightClickMonitor {
 
     /// Puts the caret in the field if it is not already focused (a right-click normally does), then
     /// shows the menu, so the paste goes where the click was.
-    private func open(at point: CGPoint, field: AXUIElement) {
+    private func open(at point: CGPoint, field: AXUIElement?, actions: Bool) {
         var focused: CFTypeRef?
-        AXUIElementCopyAttributeValue(field, kAXFocusedAttribute as CFString, &focused)
-        if (focused as? Bool) != true {
+        if let field { AXUIElementCopyAttributeValue(field, kAXFocusedAttribute as CFString, &focused) }
+        if field != nil, (focused as? Bool) != true {
             for type in [CGEventType.leftMouseDown, .leftMouseUp] {
                 CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)?
                     .post(tap: .cghidEventTap)
             }
             // Let the click land before the menu takes the pointer.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in self?.onRightClick(point) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in self?.onRightClick(point, actions) }
         } else {
-            onRightClick(point)
+            onRightClick(point, actions)
         }
     }
 
-    /// The editable text field under `point` (screen coordinates, top-left origin), or nil.
-    private static func editableField(at point: CGPoint) -> AXUIElement? {
+    private static func modifiers(_ flags: CGEventFlags) -> RightClickModifiers {
+        var held: RightClickModifiers = []
+        if flags.contains(.maskShift) { held.insert(.shift) }
+        if flags.contains(.maskControl) { held.insert(.control) }
+        if flags.contains(.maskAlternate) { held.insert(.option) }
+        if flags.contains(.maskCommand) { held.insert(.command) }
+        return held
+    }
+
+    /// The Accessibility element under `point` (screen coordinates, top-left origin) and its app.
+    private static func element(at point: CGPoint) -> (element: AXUIElement, pid: pid_t)? {
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, 0.15)
         var found: AXUIElement?
         guard AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &found) == .success, let element = found else { return nil }
         var pid: pid_t = 0
         AXUIElementGetPid(element, &pid)
-        guard pid != ProcessInfo.processInfo.processIdentifier else { return nil } // our own menus and windows
+        return (element, pid)
+    }
 
+    private static func isEditable(_ element: AXUIElement) -> Bool {
         func string(_ attribute: String) -> String? {
             var value: CFTypeRef?
             return AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success ? value as? String : nil
         }
         var settable: DarwinBoolean = false
         AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable)
-        guard EditableField.isEditable(role: string(kAXRoleAttribute), subrole: string(kAXSubroleAttribute),
-                                       valueIsSettable: settable.boolValue) else { return nil }
-        return element
+        return EditableField.isEditable(role: string(kAXRoleAttribute), subrole: string(kAXSubroleAttribute),
+                                        valueIsSettable: settable.boolValue)
     }
 }

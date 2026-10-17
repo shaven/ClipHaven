@@ -20,6 +20,8 @@ final class MenuController: NSObject, NSMenuDelegate {
     private let icons = MenuIcons()
     private let clicks = ActionClickTracker()
     private weak var statusMenu: NSMenu?
+    /// Set when the menu was opened with Control-right-click: choosing a clip opens its actions.
+    private var actionMode = false
     var appearance: MenuAppearance {
         get { icons.appearance }
         set { icons.appearance = newValue }
@@ -69,7 +71,8 @@ final class MenuController: NSObject, NSMenuDelegate {
 
     /// Pops the history menu at the mouse pointer, without activating ClipHaven, so focus
     /// stays in the app the clip will be pasted into.
-    func popUpAtCursor() {
+    func popUpAtCursor(actions: Bool = false) {
+        actionMode = actions
         let menu = NSMenu()
         menu.delegate = self
         fill(menu)
@@ -177,7 +180,8 @@ final class MenuController: NSObject, NSMenuDelegate {
     /// a menu item into a right-click and the event can arrive without its Control flag, so the keys
     /// held right now count as well as the event's own flags.
     private func isActionClick() -> Bool {
-        defer { clicks.reset() }
+        defer { clicks.reset(); actionMode = false }
+        if actionMode { return true }
         let held = NSEvent.modifierFlags
         let event = NSApp.currentEvent
         let eventFlags = event?.modifierFlags ?? []

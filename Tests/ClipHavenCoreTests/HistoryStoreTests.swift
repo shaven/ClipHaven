@@ -23,6 +23,16 @@ final class HistoryStoreTests: XCTestCase {
         [Representation(type: "public.utf8-plain-text", data: Data(s.utf8))]
     }
 
+    func testFileCopyWithNameTextSummarisesAsFile() throws {
+        let store = try makeStore()
+        try store.insert(text("report.pptx") + [Representation(type: "public.file-url", data: Data("file:///tmp/report.pptx".utf8))],
+                         title: "report.pptx")
+        try store.insert(text("plain"), title: "plain")
+
+        let summaries = try store.summaries(limit: 10)
+        XCTAssertEqual(summaries.map(\.primaryType), ["public.utf8-plain-text", "public.file-url"])
+    }
+
     func testInsertAndFetchNewestFirst() throws {
         let store = try makeStore()
         try store.insert(text("one"), title: "one")

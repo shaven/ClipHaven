@@ -123,4 +123,25 @@ final class PreferencesTests: XCTestCase {
         prefs.reset()
         XCTAssertTrue(prefs.rightClickMenu)
     }
+
+    func testRightClickGesturesDefaultAndAreRecordable() {
+        var prefs = Preferences(defaults: defaults)
+        XCTAssertEqual(prefs.rightClickPaste, [.shift, .control])
+        XCTAssertEqual(prefs.rightClickActions, [.control])
+        prefs.rightClickPaste = [.option, .command]
+        prefs.rightClickActions = [.option]
+        XCTAssertEqual(Preferences(defaults: defaults).rightClickPaste, [.option, .command])
+        XCTAssertEqual(Preferences(defaults: defaults).rightClickActions, [.option])
+        prefs.reset()
+        XCTAssertEqual(prefs.rightClickPaste, [.shift, .control])
+        XCTAssertEqual(prefs.rightClickActions, [.control])
+    }
+
+    func testAGestureWithNoModifierIsRefused() {
+        var prefs = Preferences(defaults: defaults)
+        prefs.rightClickPaste = []
+        XCTAssertEqual(prefs.rightClickPaste, [.shift, .control], "a bare right-click would take over every field")
+        defaults.set(99, forKey: "rightClickPasteKeys")
+        XCTAssertEqual(prefs.rightClickPaste, [.shift, .control], "a stale value falls back to the default")
+    }
 }

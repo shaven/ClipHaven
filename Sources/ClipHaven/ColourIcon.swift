@@ -52,13 +52,16 @@ enum ColourIcon {
         color(0xFFFFFF).setFill()
         NSBezierPath(roundedRect: r(3.2, 1.7, 11.6, 11.3), xRadius: 1.8 * s, yRadius: 1.8 * s).fill()
 
-        // "CH" in bold red, centred on the sheet.
+        // Upright bold red "C" up and to the left, "H" down and to the right: each sits `step`
+        // points off the sheet's centre along the diagonal (as in StatusIcon).
         let font = NSFont.systemFont(ofSize: 7.4 * s, weight: .black)
-        let letters = NSAttributedString(string: "CH", attributes: [
-            .font: font, .foregroundColor: color(0xE3141F), .kern: -0.2 * s,
-        ])
-        let size = letters.size()
-        letters.draw(at: NSPoint(x: art.minX + 9 * s - size.width / 2, y: art.minY + 6.9 * s - size.height / 2))
+        let step: CGFloat = 2.4
+        for (letter, offset) in [("C", -step), ("H", step)] {
+            let text = NSAttributedString(string: letter, attributes: [.font: font, .foregroundColor: color(0xE3141F)])
+            let size = text.size()
+            text.draw(at: NSPoint(x: art.minX + (9 + offset) * s - size.width / 2,
+                                  y: art.minY + (6.9 - offset) * s - size.height / 2))
+        }
 
         // Clip at the top, gold, with a hole.
         let clip = NSBezierPath(roundedRect: r(5.6, 12.4, 6.8, 4.6), xRadius: 1.5 * s, yRadius: 1.5 * s)

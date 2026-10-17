@@ -108,6 +108,28 @@ public struct Preferences {
         set { defaults.set(newValue, forKey: "rightClickMenu") }
     }
 
+    /// Keys held with a right-click to open the paste menu; at least one key, else the default.
+    public var rightClickPaste: RightClickModifiers {
+        get { gesture("rightClickPasteKeys", RightClickGesture.defaultPaste) }
+        set { setGesture(newValue, "rightClickPasteKeys") }
+    }
+
+    /// Keys held with a right-click to open the action menu.
+    public var rightClickActions: RightClickModifiers {
+        get { gesture("rightClickActionKeys", RightClickGesture.defaultActions) }
+        set { setGesture(newValue, "rightClickActionKeys") }
+    }
+
+    private func gesture(_ key: String, _ fallback: RightClickModifiers) -> RightClickModifiers {
+        guard let raw = defaults.object(forKey: key) as? Int, (1...15).contains(raw) else { return fallback }
+        return RightClickModifiers(rawValue: raw)
+    }
+
+    private func setGesture(_ value: RightClickModifiers, _ key: String) {
+        guard !value.isEmpty else { return }
+        defaults.set(value.rawValue, forKey: key)
+    }
+
     public var appearance: MenuAppearance {
         var look = MenuAppearance()
         look.showIcons = showIcons
@@ -137,7 +159,8 @@ public struct Preferences {
     public mutating func reset() {
         for key in ["autoPaste", "hotKeyCode", "hotKeyModifiers", "maxCount", "maxImageBytes", "inlineCount",
                     "folderSize", "titleLength", "numbered", "restoreDelay", "showIcons", "iconSize",
-                    "showThumbnails", "thumbnailWidth", "thumbnailHeight", "statusIcon", "rightClickMenu"] {
+                    "showThumbnails", "thumbnailWidth", "thumbnailHeight", "statusIcon", "rightClickMenu",
+                    "rightClickPasteKeys", "rightClickActionKeys"] {
             defaults.removeObject(forKey: key)
         }
     }

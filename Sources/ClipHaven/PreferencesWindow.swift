@@ -17,8 +17,16 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
     private let rightClickNote = NSTextField(labelWithString: "")
     private var controls: [String: NSControl] = [:]
 
-    init(onChange: @escaping () -> Void) {
+    /// Called with true while a right-click gesture is being recorded, so ClipHaven's own
+    /// right-click handling steps aside and the click reaches the recorder.
+    private let onRecording: (Bool) -> Void
+    private var gestureRecorder: Any?
+    private var recordingGesture: String?
+    private var gestureLabels: [String: NSTextField] = [:]
+
+    init(onChange: @escaping () -> Void, onRecording: @escaping (Bool) -> Void = { _ in }) {
         self.onChange = onChange
+        self.onRecording = onRecording
     }
 
     func show() {
@@ -31,7 +39,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
     // MARK: - Window
 
     private func build() {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 520),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 590),
                               styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "ClipHaven Preferences"
         window.isReleasedWhenClosed = false
@@ -57,7 +65,9 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             [label("Title length"), number("titleLength")],
             [label("History size"), number("maxCount"), ],
             [label(""), note("Read at launch: quit and reopen ClipHaven after changing it.")],
-            [label("Right-click"), check("rightClickMenu", "Right-click in a text field opens ClipHaven")],
+            [label("Right-click"), check("rightClickMenu", "Modifier keys + right-click open ClipHaven")],
+            [label("Paste menu"), gestureRow("paste")],
+            [label("Action menu"), gestureRow("actions")],
             [label(""), rightClickNote],
             [label("Menu icons"), check("showIcons", "Show icons in the menu")],
             [label(""), check("showThumbnails", "Show thumbnails for images")],
@@ -83,6 +93,20 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         ])
         window.contentView = content
         self.window = window
+    }
+
+    /// "⌃⇧ + right-click   [Record…] [Default]" for one of the two gestures.
+    private func gestureRow(_ id: String) -> NSView {
+        let text = NSTextField(labelWithString: "")
+        text.widthAnchor.constraint(greaterThanOrEqualToConstant: 150).isActive = true
+        gestureLabels[id] = text
+        let record = NSButton(title: "Record…", target: self, action: #selector(recordGesture(_:)))
+        record.identifier = .init(id)
+        let reset = NSButton(title: "Default", target: self, action: #selector(defaultGesture(_:)))
+        reset.identifier = .init(id)
+        let row = NSStackView(views: [text, record, reset])
+        row.spacing = 8
+        return row
     }
 
     private func label(_ text: String) -> NSTextField { NSTextField(labelWithString: text) }
@@ -129,6 +153,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         stopRecording()
+        stopGestureRecording()
     }
 
     // MARK: - Values
@@ -138,8 +163,10 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         (controls["numbered"] as? NSButton)?.state = prefs.numbered ? .on : .off
         (controls["login"] as? NSButton)?.state = LoginItem.isEnabled ? .on : .off
         (controls["rightClickMenu"] as? NSButton)?.state = prefs.rightClickMenu ? .on : .off
+        gestureLabels["paste"]?.stringValue = "\(prefs.rightClickPaste.symbols) + right-click"
+        gestureLabels["actions"]?.stringValue = "\(prefs.rightClickActions.symbols) + right-click"
         rightClickNote.stringValue = AXIsProcessTrusted()
-            ? "Other right-clicks still show the app's own menu."
+            ? "A plain right-click still shows the app's own menu. The paste menu pastes the clip you pick; the action menu opens its actions."
             : "Needs Accessibility: System Settings, Privacy & Security, Accessibility, ClipHaven."
         rightClickNote.textColor = .secondaryLabelColor
         rightClickNote.font = .systemFont(ofSize: 11)
@@ -184,6 +211,60 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         prefs.reset()
         refresh()
         onChange()
+    }
+
+    // MARK: - Right-click gestures
+
+    @objc private func recordGesture(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue else { return }
+        stopGestureRecording()
+        recordingGesture = id
+        gestureLabels[id]?.stringValue = "Hold the keys, then right-click here…"
+        onRecording(true)
+        gestureRecorder = NSEvent.addLocalMonitorForEvents(matching: .rightMouseDown) { [weak self] event in
+            MainActor.assumeIsolated { self?.finishGesture(event) }
+            return nil
+        }
+    }
+
+    private func finishGesture(_ event: NSEvent) {
+        guard let id = recordingGesture else { return }
+        var held: RightClickModifiers = []
+        let flags = event.modifierFlags
+        if flags.contains(.shift) { held.insert(.shift) }
+        if flags.contains(.control) { held.insert(.control) }
+        if flags.contains(.option) { held.insert(.option) }
+        if flags.contains(.command) { held.insert(.command) }
+        // A bare right-click would take over every field, and the two menus need different keys.
+        let other = id == "paste" ? prefs.rightClickActions : prefs.rightClickPaste
+        guard !held.isEmpty, held != other else {
+            NSSound.beep()
+            gestureLabels[id]?.stringValue = held.isEmpty ? "Hold at least one key, then right-click here…" : "\(held.symbols) is used by the other menu. Try another…"
+            return
+        }
+        stopGestureRecording()
+        if id == "paste" { prefs.rightClickPaste = held } else { prefs.rightClickActions = held }
+        refresh()
+        onChange()
+    }
+
+    @objc private func defaultGesture(_ sender: NSButton) {
+        stopGestureRecording()
+        switch sender.identifier?.rawValue {
+        case "paste": prefs.rightClickPaste = RightClickGesture.defaultPaste
+        case "actions": prefs.rightClickActions = RightClickGesture.defaultActions
+        default: break
+        }
+        refresh()
+        onChange()
+    }
+
+    private func stopGestureRecording() {
+        if let gestureRecorder { NSEvent.removeMonitor(gestureRecorder) }
+        gestureRecorder = nil
+        if recordingGesture != nil { onRecording(false) }
+        recordingGesture = nil
+        refresh()
     }
 
     // MARK: - Hotkey

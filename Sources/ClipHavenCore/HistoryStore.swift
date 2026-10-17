@@ -180,13 +180,15 @@ public final class HistoryStore {
         }
     }
 
-    /// Clips newest first, without their representations.
+    /// Clips newest first, without their representations. A file copied in Finder also carries its
+    /// name as text, so a file URL outranks the other types: the menu then shows the file's own icon.
     public func summaries(limit: Int) throws -> [ClipSummary] {
         try query("""
             SELECT c.id, c.title,
-                   (SELECT type FROM representations r WHERE r.clip_id = c.id ORDER BY rowid LIMIT 1)
+                   (SELECT type FROM representations r WHERE r.clip_id = c.id
+                    ORDER BY r.type = ? DESC, rowid LIMIT 1)
             FROM clips c ORDER BY c.seq DESC LIMIT ?
-            """, [.int(Int64(limit))]) { stmt in
+            """, [.text(ClipType.filenames.pasteboardType), .int(Int64(limit))]) { stmt in
             ClipSummary(id: sqlite3_column_int64(stmt, 0), title: Self.text(stmt, 1), primaryType: Self.text(stmt, 2))
         }
     }

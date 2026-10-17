@@ -56,7 +56,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.appearance = prefs.appearance
             controller.showPreferences = { [weak self] in self?.showPreferences() }
             registerHotKey()
-            rightClick.onRightClick = { [weak self] _ in self?.menuController?.popUpAtCursor() }
+            rightClick.gestures = { let prefs = Preferences(); return (prefs.rightClickPaste, prefs.rightClickActions) }
+            rightClick.onRightClick = { [weak self] _, actions in self?.menuController?.popUpAtCursor(actions: actions) }
             applyRightClick()
             item.menu = controller.makeStatusMenu()
             startPolling()
@@ -113,7 +114,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showPreferences() {
         if preferencesWindow == nil {
-            preferencesWindow = PreferencesWindow { [weak self] in self?.applyPreferences() }
+            preferencesWindow = PreferencesWindow(onChange: { [weak self] in self?.applyPreferences() },
+                                                  onRecording: { [weak self] recording in self?.rightClick.isPaused = recording })
         }
         preferencesWindow?.show()
     }

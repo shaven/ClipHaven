@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var paster: Paster?
     private var secretPaster: SecretPaster?
     private var preferencesWindow: PreferencesWindow?
+    private let rightClick = RightClickMonitor()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMainMenu()
@@ -55,6 +56,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.appearance = prefs.appearance
             controller.showPreferences = { [weak self] in self?.showPreferences() }
             registerHotKey()
+            rightClick.onRightClick = { [weak self] _ in self?.menuController?.popUpAtCursor() }
+            applyRightClick()
             item.menu = controller.makeStatusMenu()
             startPolling()
         } catch {
@@ -115,6 +118,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferencesWindow?.show()
     }
 
+    /// Turns the right-click-in-a-text-field menu on or off to match the setting.
+    private func applyRightClick() {
+        if Preferences().rightClickMenu {
+            if !rightClick.start() { NSLog("ClipHaven: right-click menu needs the Accessibility permission") }
+        } else {
+            rightClick.stop()
+        }
+    }
+
     /// ClipHaven's drawn icon, or one of ClipMenu's PNGs. Coloured ones are shown as they are;
     /// the black ones are tinted by macOS for light and dark menu bars.
     private func applyStatusIcon() {
@@ -144,6 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuController?.layout = prefs.layout
         menuController?.appearance = prefs.appearance
         applyStatusIcon()
+        applyRightClick()
         registerHotKey()
     }
 

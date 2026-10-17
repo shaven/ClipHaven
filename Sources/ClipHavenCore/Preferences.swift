@@ -102,6 +102,12 @@ public struct Preferences {
         set { defaults.set(newValue, forKey: "statusIcon") }
     }
 
+    /// A plain right-click on a text field, in any app, opens the clip menu there.
+    public var rightClickMenu: Bool {
+        get { bool("rightClickMenu", true) }
+        set { defaults.set(newValue, forKey: "rightClickMenu") }
+    }
+
     public var appearance: MenuAppearance {
         var look = MenuAppearance()
         look.showIcons = showIcons
@@ -131,7 +137,7 @@ public struct Preferences {
     public mutating func reset() {
         for key in ["autoPaste", "hotKeyCode", "hotKeyModifiers", "maxCount", "maxImageBytes", "inlineCount",
                     "folderSize", "titleLength", "numbered", "restoreDelay", "showIcons", "iconSize",
-                    "showThumbnails", "thumbnailWidth", "thumbnailHeight", "statusIcon"] {
+                    "showThumbnails", "thumbnailWidth", "thumbnailHeight", "statusIcon", "rightClickMenu"] {
             defaults.removeObject(forKey: key)
         }
     }

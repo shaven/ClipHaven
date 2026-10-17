@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Carbon.HIToolbox
 import ClipHavenCore
 
@@ -13,6 +14,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
     private let hotKeyLabel = NSTextField(labelWithString: "")
     private let hotKeyButton = NSButton(title: "Record…", target: nil, action: nil)
     private let loginNote = NSTextField(labelWithString: "")
+    private let rightClickNote = NSTextField(labelWithString: "")
     private var controls: [String: NSControl] = [:]
 
     init(onChange: @escaping () -> Void) {
@@ -29,7 +31,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
     // MARK: - Window
 
     private func build() {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 470),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 520),
                               styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "ClipHaven Preferences"
         window.isReleasedWhenClosed = false
@@ -55,6 +57,8 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             [label("Title length"), number("titleLength")],
             [label("History size"), number("maxCount"), ],
             [label(""), note("Read at launch: quit and reopen ClipHaven after changing it.")],
+            [label("Right-click"), check("rightClickMenu", "Right-click in a text field opens ClipHaven")],
+            [label(""), rightClickNote],
             [label("Menu icons"), check("showIcons", "Show icons in the menu")],
             [label(""), check("showThumbnails", "Show thumbnails for images")],
             [label("Icon size"), popup("iconSize", Self.iconSizes.map { "\($0) pt" })],
@@ -133,6 +137,12 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         (controls["autoPaste"] as? NSButton)?.state = prefs.autoPaste ? .on : .off
         (controls["numbered"] as? NSButton)?.state = prefs.numbered ? .on : .off
         (controls["login"] as? NSButton)?.state = LoginItem.isEnabled ? .on : .off
+        (controls["rightClickMenu"] as? NSButton)?.state = prefs.rightClickMenu ? .on : .off
+        rightClickNote.stringValue = AXIsProcessTrusted()
+            ? "Other right-clicks still show the app's own menu."
+            : "Needs Accessibility: System Settings, Privacy & Security, Accessibility, ClipHaven."
+        rightClickNote.textColor = .secondaryLabelColor
+        rightClickNote.font = .systemFont(ofSize: 11)
         (controls["showIcons"] as? NSButton)?.state = prefs.showIcons ? .on : .off
         (controls["showThumbnails"] as? NSButton)?.state = prefs.showThumbnails ? .on : .off
         (controls["iconSize"] as? NSPopUpButton)?.selectItem(at: Self.iconSizes.firstIndex(of: prefs.iconSize) ?? 0)
@@ -155,6 +165,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         case "titleLength": prefs.titleLength = sender.integerValue
         case "maxCount": prefs.maxCount = sender.integerValue
         case "restoreDelay": prefs.restoreDelay = sender.doubleValue
+        case "rightClickMenu": prefs.rightClickMenu = sender.integerValue != 0
         case "showIcons": prefs.showIcons = sender.integerValue != 0
         case "showThumbnails": prefs.showThumbnails = sender.integerValue != 0
         case "iconSize":

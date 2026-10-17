@@ -114,5 +114,13 @@ final class PreferencesTests: XCTestCase {
         XCTAssertEqual(prefs.iconSize, 16)
         XCTAssertEqual(prefs.statusIcon, "colour")
     }
-}
 
+    func testRightClickMenuIsOnByDefaultAndResets() {
+        var prefs = Preferences(defaults: defaults)
+        XCTAssertTrue(prefs.rightClickMenu)
+        prefs.rightClickMenu = false
+        XCTAssertFalse(prefs.rightClickMenu)
+        prefs.reset()
+        XCTAssertTrue(prefs.rightClickMenu)
+    }
+}

@@ -18,6 +18,8 @@ final class MenuController: NSObject, NSMenuDelegate {
     private lazy var editor = SnippetEditor(store: snippets, secrets: secretPaster) {}
     var layout = MenuLayout()
     private let icons = MenuIcons()
+    private let clicks = ActionClickTracker()
+    private weak var statusMenu: NSMenu?
     var appearance: MenuAppearance {
         get { icons.appearance }
         set { icons.appearance = newValue }
@@ -45,18 +47,31 @@ final class MenuController: NSObject, NSMenuDelegate {
     func makeStatusMenu() -> NSMenu {
         let menu = NSMenu()
         menu.delegate = self
+        statusMenu = menu
         return menu
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        // The hotkey menu is filled before it opens; only the status menu is rebuilt each time.
+        guard menu === statusMenu else { return }
         menu.removeAllItems()
         fill(menu)
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        clicks.start()
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        // The chosen item's action runs just after the menu closes, so sampling stops later.
+        clicks.stop(after: 0.6)
     }
 
     /// Pops the history menu at the mouse pointer, without activating ClipHaven, so focus
     /// stays in the app the clip will be pasted into.
     func popUpAtCursor() {
         let menu = NSMenu()
+        menu.delegate = self
         fill(menu)
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
@@ -147,7 +162,7 @@ final class MenuController: NSObject, NSMenuDelegate {
         guard let target = sender.representedObject as? MenuTarget else { return }
         switch target {
         case .clip(let id):
-            if Self.isActionClick() {
+            if isActionClick() {
                 popUpActions(for: id)
             } else {
                 report { try paster.choose(clipID: id) }
@@ -160,10 +175,16 @@ final class MenuController: NSObject, NSMenuDelegate {
     /// Control-click (or a right-click) on a clip opens its actions. macOS turns a Control-click on
     /// a menu item into a right-click and the event can arrive without its Control flag, so the keys
     /// held right now count as well as the event's own flags.
-    private static func isActionClick() -> Bool {
-        if NSEvent.modifierFlags.contains(.control) { return true }
-        guard let event = NSApp.currentEvent else { return false }
-        return event.modifierFlags.contains(.control) || event.type == .rightMouseUp || event.type == .rightMouseDown
+    private func isActionClick() -> Bool {
+        defer { clicks.reset() }
+        let held = NSEvent.modifierFlags
+        let event = NSApp.currentEvent
+        let eventFlags = event?.modifierFlags ?? []
+        let rightClick = event.map { $0.type == .rightMouseUp || $0.type == .rightMouseDown } ?? false
+        let result = clicks.sawActionClick || held.contains(.control) || held.contains(.option)
+            || eventFlags.contains(.control) || eventFlags.contains(.option) || rightClick
+        NSLog("ClipHaven: choose sampled=\(clicks.sawActionClick) held=\(held.rawValue) event=\(event.map { "\($0.type.rawValue)/\($0.modifierFlags.rawValue)" } ?? "none") -> actions=\(result)")
+        return result
     }
 
     /// A locked snippet asks for Touch ID first; an ordinary one is pasted like a clip.

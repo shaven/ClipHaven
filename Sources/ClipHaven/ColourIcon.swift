@@ -1,7 +1,7 @@
 import AppKit
 
-/// ClipHaven's coloured icon, for the menu bar and the app: a blue clipboard with a white sheet,
-/// three bright clip lines and a gold clip. Drawn in code, so it stays sharp at every size.
+/// ClipHaven's coloured icon, for the menu bar and the app: a blue-framed clipboard with a white
+/// sheet, a bold red "CH" and a gold clip. Drawn in code, so it stays sharp at every size.
 enum ColourIcon {
     /// For the menu bar. Not a template image: the colours are shown as they are.
     static func menuBar(size: CGFloat = 18) -> NSImage {
@@ -41,35 +41,32 @@ enum ColourIcon {
             NSRect(x: art.minX + x * s, y: art.minY + y * s, width: w * s, height: h * s)
         }
 
-        // Board.
-        let board = NSBezierPath(roundedRect: r(1.6, 0.4, 14.8, 15.4), xRadius: 3.2 * s, yRadius: 3.2 * s)
-        NSGradient(starting: color(0x5BA4FF), ending: color(0x2D5BE3))?.draw(in: board, angle: -90)
-        color(0x1E3FB5).withAlphaComponent(0.55).setStroke()
-        board.lineWidth = 0.7 * s
+        // Board: a strong blue frame, so the icon reads at menu-bar size.
+        let board = NSBezierPath(roundedRect: r(1.2, 0.2, 15.6, 15.8), xRadius: 3.4 * s, yRadius: 3.4 * s)
+        NSGradient(starting: color(0x2F7BFF), ending: color(0x0A3FD1))?.draw(in: board, angle: -90)
+        color(0x082C9E).setStroke()
+        board.lineWidth = 0.9 * s
         board.stroke()
 
         // Sheet.
         color(0xFFFFFF).setFill()
-        NSBezierPath(roundedRect: r(3.7, 2, 10.6, 11.2), xRadius: 1.6 * s, yRadius: 1.6 * s).fill()
+        NSBezierPath(roundedRect: r(3.2, 1.7, 11.6, 11.3), xRadius: 1.8 * s, yRadius: 1.8 * s).fill()
 
-        // Clip lines, one bright colour each.
-        for (y, width, hex) in [(10.0, 7.4, 0xFF9F0A as UInt32), (7.3, 6.0, 0x30B0C7), (4.6, 7.0, 0xFF375F)] {
-            color(hex).setStroke()
-            let line = NSBezierPath()
-            line.lineWidth = 1.6 * s
-            line.lineCapStyle = .round
-            line.move(to: NSPoint(x: art.minX + 5.5 * s, y: art.minY + y * s))
-            line.line(to: NSPoint(x: art.minX + (5.5 + width - 1.6) * s, y: art.minY + y * s))
-            line.stroke()
-        }
+        // "CH" in bold red, centred on the sheet.
+        let font = NSFont.systemFont(ofSize: 7.4 * s, weight: .black)
+        let letters = NSAttributedString(string: "CH", attributes: [
+            .font: font, .foregroundColor: color(0xE3141F), .kern: -0.2 * s,
+        ])
+        let size = letters.size()
+        letters.draw(at: NSPoint(x: art.minX + 9 * s - size.width / 2, y: art.minY + 6.9 * s - size.height / 2))
 
         // Clip at the top, gold, with a hole.
         let clip = NSBezierPath(roundedRect: r(5.6, 12.4, 6.8, 4.6), xRadius: 1.5 * s, yRadius: 1.5 * s)
         NSGradient(starting: color(0xFFD65A), ending: color(0xF2A900))?.draw(in: clip, angle: -90)
-        color(0xB77900).withAlphaComponent(0.7).setStroke()
-        clip.lineWidth = 0.6 * s
+        color(0x9A6500).setStroke()
+        clip.lineWidth = 0.8 * s
         clip.stroke()
-        color(0x2D5BE3).setFill()
+        color(0x0A3FD1).setFill()
         NSBezierPath(ovalIn: r(7.9, 14.1, 2.2, 1.6)).fill()
     }
 }

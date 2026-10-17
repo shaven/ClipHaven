@@ -20,6 +20,7 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
     private let keychainNote = NSTextField(labelWithString: "")
     private let moveButton = NSButton(title: "Move to Keychain…", target: nil, action: nil)
     private let linkButton = NSButton(title: "Use Keychain Item…", target: nil, action: nil)
+    private let syncButton = NSButton(title: "Sync through iCloud Keychain", target: nil, action: nil)
 
     init(store: SnippetStore, secrets: SecretPaster, onChange: @escaping () -> Void) {
         self.store = store
@@ -71,11 +72,14 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
         moveButton.action = #selector(moveToKeychain)
         linkButton.target = self
         linkButton.action = #selector(linkKeychainItem)
+        syncButton.target = self
+        syncButton.action = #selector(syncThroughICloud)
         keychainNote.textColor = .secondaryLabelColor
         keychainNote.lineBreakMode = .byTruncatingMiddle
         let lockRow = NSStackView(views: [requireAuthBox, moveButton, linkButton])
         lockRow.spacing = 8
-        let rightColumn = NSStackView(views: [contentScroll, keychainNote, lockRow])
+        let syncRow = NSStackView(views: [syncButton])
+        let rightColumn = NSStackView(views: [contentScroll, keychainNote, lockRow, syncRow])
         rightColumn.orientation = .vertical
         rightColumn.alignment = .leading
         rightColumn.spacing = 6
@@ -173,8 +177,12 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
         requireAuthBox.state = (snippet?.requiresAuth ?? false) || isSecret ? .on : .off
         moveButton.isEnabled = snippet != nil && !isSecret
         linkButton.isEnabled = snippet != nil && (snippet?.content.isEmpty ?? false) && !isSecret
+        syncButton.isEnabled = isSecret
         if let ref = snippet?.secret {
-            keychainNote.stringValue = "In the Keychain: \(ref.service) / \(ref.account). Touch ID on every paste."
+            let synced = snippet.flatMap { try? secrets.isSynchronized(snippetID: $0.id) }
+            let where_ = synced == true ? "Syncs through iCloud Keychain." : synced == false ? "This Mac only." : "Item not found."
+            syncButton.isEnabled = synced == false
+            keychainNote.stringValue = "In the Keychain: \(ref.service) / \(ref.account). Touch ID on every paste. \(where_)"
         } else {
             keychainNote.stringValue = ""
         }
@@ -293,7 +301,8 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
         var removeItem = false
         if let ref = snippet.secret {
             switch askAboutKeychain(message: "Delete “\(snippet.title)”?",
-                                    detail: "Its password is in the Keychain as \(ref.service) / \(ref.account). Delete that Keychain item too? Keeping it leaves an unused item in the Keychain.") {
+                                    detail: "Its password is in the Keychain as \(ref.service) / \(ref.account). Delete that Keychain item too? Keeping it leaves an unused item in the Keychain."
+                                    + ((try? secrets.isSynchronized(snippetID: snippet.id)) == true ? " It syncs through iCloud Keychain, so removing it removes it on your other Macs too." : "")) {
             case .cancel: return
             case .snippetAndItem: removeItem = true
             case .snippetOnly: break
@@ -321,6 +330,27 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
             try secrets.moveToKeychain(snippetID: snippet.id, as: ref)
         } catch {
             showError("The Keychain refused the item", "\(error)")
+        }
+        changed()
+    }
+
+    /// Makes the password sync to the other Macs on this Apple ID. A synced item cannot carry the
+    /// Keychain's own Touch ID rule; ClipHaven still asks before every paste.
+    @objc private func syncThroughICloud() {
+        guard let snippet = snippets.first(where: { $0.id == selectedSnippetID }) else { return }
+        let alert = NSAlert()
+        alert.messageText = "Sync “\(snippet.title)” through iCloud Keychain?"
+        alert.informativeText = "The password will appear on your other Macs signed in to the same Apple ID with iCloud Keychain on. Touch ID is still asked before every paste in ClipHaven. Removing the item later removes it from all of them."
+        alert.addButton(withTitle: "Sync")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            switch try secrets.synchronize(snippetID: snippet.id) {
+            case .missing: showError("Keychain item not found", "Link the snippet to an existing item first.")
+            default: break
+            }
+        } catch {
+            showError("Could not sync", "\(error)\n\nThis needs a ClipHaven build signed with its provisioning profile.")
         }
         changed()
     }

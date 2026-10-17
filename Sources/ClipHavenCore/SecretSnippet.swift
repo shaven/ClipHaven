@@ -16,6 +16,10 @@ public protocol SecretProvider: AnyObject {
     func read(_ ref: SecretRef) throws -> String?
     func store(_ value: String, as ref: SecretRef) throws
     func remove(_ ref: SecretRef) throws
+    /// Whether the item syncs through iCloud Keychain; nil when there is no such item.
+    func isSynchronized(_ ref: SecretRef) throws -> Bool?
+    /// Makes the item sync through iCloud Keychain, keeping its value. False if there is no item.
+    func makeSynchronized(_ ref: SecretRef) throws -> Bool
 }
 
 /// Touch ID, else the Mac password. Asked afresh on every locked paste.
@@ -33,6 +37,17 @@ public protocol SecretPasteboard: PasteboardWriter {
 /// Runs `work` once after a delay; a main-queue timer in the app, a manual trigger in tests.
 public protocol Scheduler {
     func after(_ seconds: TimeInterval, _ work: @escaping () -> Void)
+}
+
+public enum SecretSyncOutcome: Equatable, Sendable {
+    case synchronized
+    case alreadySynchronized
+    /// Authentication failed or was cancelled: nothing was changed.
+    case cancelled
+    case missing
+    /// Not a Keychain snippet, so there is no item to sync.
+    case notKeychain
+    case notFound
 }
 
 public enum SecretPasteOutcome: Equatable, Sendable {
@@ -109,6 +124,27 @@ public final class SecretPaster {
             }
         }
         return .pasted
+    }
+
+    /// Whether a Keychain snippet's item syncs through iCloud Keychain; nil for any other snippet
+    /// or an item that is not there.
+    public func isSynchronized(snippetID: Int64) throws -> Bool? {
+        guard let ref = try snippets.snippet(id: snippetID)?.secret else { return nil }
+        return try secrets.isSynchronized(ref)
+    }
+
+    /// Makes a Keychain snippet's item sync through iCloud Keychain, so the other Macs on the same
+    /// Apple ID get it. Reading the value is the sensitive step, so it asks for Touch ID first.
+    public func synchronize(snippetID: Int64) throws -> SecretSyncOutcome {
+        guard let snippet = try snippets.snippet(id: snippetID) else { return .notFound }
+        guard let ref = snippet.secret else { return .notKeychain }
+        switch try secrets.isSynchronized(ref) {
+        case nil: return .missing
+        case true?: return .alreadySynchronized
+        case false?: break
+        }
+        guard authenticator.authenticate(reason: "sync “\(snippet.title)” through iCloud Keychain") else { return .cancelled }
+        return try secrets.makeSynchronized(ref) ? .synchronized : .missing
     }
 
     /// Deletes a snippet, and with `removingKeychainItem` its Keychain item too, unless another

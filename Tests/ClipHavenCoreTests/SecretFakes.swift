@@ -15,7 +15,31 @@ final class FakeSecrets: SecretProvider {
         items[ref] = value
     }
 
-    func remove(_ ref: SecretRef) throws { items[ref] = nil }
+    func remove(_ ref: SecretRef) throws { items[ref] = nil; synced.remove(ref) }
+
+    /// Items that sync through iCloud Keychain; the rest stay on this Mac.
+    var synced: Set<SecretRef> = []
+    private(set) var syncCalls = 0
+
+    func isSynchronized(_ ref: SecretRef) throws -> Bool? {
+        items[ref] == nil ? nil : synced.contains(ref)
+    }
+
+    func makeSynchronized(_ ref: SecretRef) throws -> Bool {
+        guard items[ref] != nil else { return false }
+        syncCalls += 1
+        synced.insert(ref)
+        return true
+    }
+}
+
+/// The iCloud Keychain item holding the snippet snapshot, shared by every "Mac" in a test.
+final class FakeSnapshotStore: SnapshotStore {
+    var data: Data?
+    private(set) var writes = 0
+
+    func read() throws -> Data? { data }
+    func write(_ data: Data) throws { self.data = data; writes += 1 }
 }
 
 final class FakeAuthenticator: Authenticator {

@@ -138,6 +138,45 @@ public final class SnippetStore {
         }
     }
 
+    /// Adds what is missing, all or nothing, and replaces nothing. A folder is matched by title;
+    /// a snippet by its title and its text (a Keychain snippet by its title and item). Counts are
+    /// of what was added.
+    @discardableResult
+    public func mergeFolders(_ folders: [ImportedFolder]) throws -> ImportCounts {
+        try database.transaction {
+            let existing = try self.folders()
+            var folderCount = 0, snippetCount = 0
+            func key(_ title: String, _ secret: SecretRef?, _ content: String) -> String {
+                secret.map { "\(title)\u{0}keychain\u{0}\($0.service)\u{0}\($0.account)" } ?? "\(title)\u{0}text\u{0}\(content)"
+            }
+            var created: [String: Int64] = [:]
+            for folder in folders {
+                let match = existing.first { $0.title == folder.title }
+                let id: Int64
+                var known: Set<String>
+                if let match {
+                    id = match.id
+                    known = Set(match.snippets.map { key($0.title, $0.secret, $0.content) })
+                } else if let earlier = created[folder.title] {
+                    id = earlier
+                    known = []
+                } else {
+                    id = try insertFolder(title: folder.title, enabled: folder.enabled)
+                    created[folder.title] = id
+                    folderCount += 1
+                    known = []
+                }
+                for snippet in folder.snippets where known.insert(key(snippet.title, snippet.secret, snippet.content)).inserted {
+                    let snippetID = try insertSnippet(folderID: id, title: snippet.title, content: snippet.content, enabled: snippet.enabled)
+                    if let secret = snippet.secret { try setSecret(id: snippetID, secret) }
+                    if snippet.requiresAuth { try setRequiresAuth(id: snippetID, true) }
+                    snippetCount += 1
+                }
+            }
+            return ImportCounts(folders: folderCount, snippets: snippetCount)
+        }
+    }
+
     // MARK: - Reading
 
     /// Every folder with its snippets, in order, enabled or not (the editor shows all).

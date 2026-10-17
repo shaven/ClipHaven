@@ -33,6 +33,8 @@ final class KeychainProvider: SecretProvider {
 
         for protectedKeychain in [true, false] {
             query[kSecUseDataProtectionKeychain as String] = protectedKeychain
+            // The protected keychain may hold the item as an iCloud-synchronizable one.
+            if protectedKeychain { query[kSecAttrSynchronizable as String] = kSecAttrSynchronizableAny }
             var result: CFTypeRef?
             let status = SecItemCopyMatching(query as CFDictionary, &result)
             switch status {
@@ -73,11 +75,67 @@ final class KeychainProvider: SecretProvider {
         for protectedKeychain in [true, false] {
             var query = base(ref)
             query[kSecUseDataProtectionKeychain as String] = protectedKeychain
+            // Removes a synchronizable item too, and so removes it from the other Macs.
+            if protectedKeychain { query[kSecAttrSynchronizable as String] = kSecAttrSynchronizableAny }
             let status = SecItemDelete(query as CFDictionary)
             guard [errSecSuccess, errSecItemNotFound, errSecMissingEntitlement].contains(status) else {
                 throw KeychainError(status: status)
             }
         }
+    }
+
+    func isSynchronized(_ ref: SecretRef) throws -> Bool? {
+        var found = false
+        for protectedKeychain in [true, false] {
+            var query = base(ref)
+            query[kSecUseDataProtectionKeychain as String] = protectedKeychain
+            if protectedKeychain { query[kSecAttrSynchronizable as String] = kSecAttrSynchronizableAny }
+            query[kSecReturnAttributes as String] = true
+            query[kSecMatchLimit as String] = kSecMatchLimitAll
+            var result: CFTypeRef?
+            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            switch status {
+            case errSecSuccess:
+                found = true
+                let items = result as? [[String: Any]] ?? []
+                if items.contains(where: { ($0[kSecAttrSynchronizable as String] as? NSNumber)?.boolValue == true }) { return true }
+            case errSecItemNotFound, errSecMissingEntitlement:
+                continue
+            default:
+                throw KeychainError(status: status)
+            }
+        }
+        return found ? false : nil
+    }
+
+    /// Adds the synchronizable copy first, then removes the one that stays on this Mac, so a
+    /// failure part-way never loses the password. A synchronizable item cannot carry the
+    /// Keychain-enforced Touch ID rule; the app still asks before every paste.
+    func makeSynchronized(_ ref: SecretRef) throws -> Bool {
+        guard let value = try read(ref) else { return false }
+        var attributes = base(ref)
+        attributes[kSecUseDataProtectionKeychain as String] = true
+        attributes[kSecAttrSynchronizable as String] = true
+        var add = attributes
+        add[kSecValueData as String] = Data(value.utf8)
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
+        var status = SecItemAdd(add as CFDictionary, nil)
+        if status == errSecDuplicateItem {
+            status = SecItemUpdate(attributes as CFDictionary, [kSecValueData as String: Data(value.utf8)] as CFDictionary)
+        }
+        guard status == errSecSuccess else { throw KeychainError(status: status) }
+
+        // Now drop this Mac's own copies (both keychains); the synchronizable one stays.
+        for protectedKeychain in [true, false] {
+            var local = base(ref)
+            local[kSecUseDataProtectionKeychain as String] = protectedKeychain
+            if protectedKeychain { local[kSecAttrSynchronizable as String] = false }
+            let removed = SecItemDelete(local as CFDictionary)
+            guard [errSecSuccess, errSecItemNotFound, errSecMissingEntitlement].contains(removed) else {
+                throw KeychainError(status: removed)
+            }
+        }
+        return true
     }
 
     private func base(_ ref: SecretRef) -> [String: Any] {

@@ -12,6 +12,7 @@ final class MenuController: NSObject, NSMenuDelegate {
     private let secretPaster: SecretPaster
     private let actions: ActionService
     private let actionStore: ActionStore
+    private let syncStore: SnapshotStore
     private let scriptsFolder: URL
     private let actionFolders: [URL]
     private lazy var editor = SnippetEditor(store: snippets, secrets: secretPaster) {}
@@ -27,7 +28,9 @@ final class MenuController: NSObject, NSMenuDelegate {
     var hotKeyNote: String?
 
     init(store: HistoryStore, snippets: SnippetStore, paster: Paster, secretPaster: SecretPaster,
-         actions: ActionService, actionStore: ActionStore, scriptsFolder: URL, actionFolders: [URL]) {
+         actions: ActionService, actionStore: ActionStore, scriptsFolder: URL, actionFolders: [URL],
+         syncStore: SnapshotStore) {
+        self.syncStore = syncStore
         self.actions = actions
         self.actionStore = actionStore
         self.scriptsFolder = scriptsFolder
@@ -100,6 +103,8 @@ final class MenuController: NSObject, NSMenuDelegate {
         let submenu = NSMenu(title: tools.title)
         submenu.addItem(actionItem("Import ClipMenu Snippets…", #selector(importClipMenuSnippets)))
         submenu.addItem(actionItem("Import ClipMenu Actions…", #selector(importClipMenuActions)))
+        submenu.addItem(.separator())
+        submenu.addItem(actionItem("Sync Snippets with iCloud Keychain…", #selector(syncSnippets)))
         submenu.addItem(.separator())
         submenu.addItem(actionItem("Export…", #selector(exportAll)))
         submenu.addItem(actionItem("Import…", #selector(importAll)))
@@ -237,6 +242,22 @@ final class MenuController: NSObject, NSMenuDelegate {
         nodes.reduce(0) { total, node in
             if case .folder(let children) = node.kind { return total + countActions(children) }
             return total + 1
+        }
+    }
+
+    /// Takes in the snippets the other Macs shared, then shares this Mac's list. Nothing is
+    /// replaced and no password value is sent: Keychain snippets travel as service and account.
+    @objc private func syncSnippets() {
+        NSApp.activate()
+        do {
+            let report = try SnippetSync.sync(snippets, with: syncStore, device: Host.current().localizedName ?? "Mac")
+            var detail = "Shared \(report.sent) snippets. Passwords sync separately: use “Sync through iCloud Keychain” on each Keychain snippet in Edit Snippets…."
+            if report.skipped > 0 {
+                detail += " \(report.skipped) plain snippet(s) flagged Require Touch ID were not shared; move them to the Keychain first."
+            }
+            show("Added \(report.added.folders) folders and \(report.added.snippets) snippets from your other Macs", detail)
+        } catch {
+            show("Sync failed", "\(error)\n\nThis needs a ClipHaven build signed with its provisioning profile, and iCloud Keychain turned on.")
         }
     }
 

@@ -48,7 +48,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Self.importClipMenuActionsOnce(into: actionStore, backups: support.appendingPathComponent("backups", isDirectory: true))
             let actions = ActionService(paster: paster, store: store, runner: runner, actionFolders: actionFolders)
             let controller = MenuController(store: store, snippets: snippets, paster: paster, secretPaster: secretPaster,
-                                            actions: actions, actionStore: actionStore, scriptsFolder: scripts, actionFolders: actionFolders)
+                                            actions: actions, actionStore: actionStore, scriptsFolder: scripts, actionFolders: actionFolders,
+                                            syncStore: SyncSnapshotStore())
             menuController = controller
             controller.layout = prefs.layout
             controller.appearance = prefs.appearance

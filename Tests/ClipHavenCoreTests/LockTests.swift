@@ -20,6 +20,8 @@ final class LockTests: SecretTestCase {
             func read(_ ref: SecretRef) throws -> String? { reads += 1; return "x" }
             func store(_ value: String, as ref: SecretRef) throws {}
             func remove(_ ref: SecretRef) throws {}
+            func isSynchronized(_ ref: SecretRef) throws -> Bool? { false }
+            func makeSynchronized(_ ref: SecretRef) throws -> Bool { true }
         }
         let spy = Spy()
         let id = try keychainSnippet()
@@ -133,6 +135,8 @@ final class DeleteSecretTests: SecretTestCase {
             func read(_ ref: SecretRef) throws -> String? { "x" }
             func store(_ value: String, as ref: SecretRef) throws {}
             func remove(_ ref: SecretRef) throws { throw SQLiteError(code: 1, message: "refused") }
+            func isSynchronized(_ ref: SecretRef) throws -> Bool? { false }
+            func makeSynchronized(_ ref: SecretRef) throws -> Bool { true }
         }
         let id = try keychainSnippet()
         let paster = SecretPaster(snippets: snippets, secrets: Refusing(), authenticator: auth, pasteboard: board,

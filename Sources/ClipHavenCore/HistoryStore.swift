@@ -35,12 +35,6 @@ public struct ClipSummary: Equatable, Sendable {
     }
 }
 
-public struct SQLiteError: Error, CustomStringConvertible {
-    public let code: Int32
-    public let message: String
-    public var description: String { "SQLite error \(code): \(message)" }
-}
-
 /// Clip history in one SQLite file: one row per clip, one row per type representation.
 ///
 /// Every change is a row-level insert, update or delete in WAL mode, so adding a clip never
@@ -65,23 +59,13 @@ public final class HistoryStore {
 
     public let url: URL
     public let limits: Limits
-    private var db: OpaquePointer?
+    private let database: SQLiteDatabase
 
     public init(url: URL, limits: Limits = Limits()) throws {
         self.url = url
         self.limits = limits
-        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
-            let error = SQLiteError(code: sqlite3_errcode(db), message: String(cString: sqlite3_errmsg(db)))
-            sqlite3_close(db)
-            throw error
-        }
-        // Wait out another connection's lock (e.g. a backup or sqlite3 reading at launch)
-        // instead of failing at once with SQLITE_BUSY.
-        sqlite3_busy_timeout(db, 5_000)
+        database = try SQLiteDatabase(url: url)
         try exec("""
-            PRAGMA journal_mode = WAL;
-            PRAGMA synchronous = NORMAL;
-            PRAGMA foreign_keys = ON;
             CREATE TABLE IF NOT EXISTS clips (
                 id      INTEGER PRIMARY KEY,
                 hash    BLOB    NOT NULL UNIQUE,
@@ -98,10 +82,6 @@ public final class HistoryStore {
             );
             PRAGMA user_version = 1;
             """)
-    }
-
-    deinit {
-        sqlite3_close(db)
     }
 
     // MARK: - Writing
@@ -126,7 +106,7 @@ public final class HistoryStore {
             }
             try run("INSERT INTO clips (hash, title, created, seq) VALUES (?, ?, ?, ?)",
                     [.blob(hash), .text(title), .double(created.timeIntervalSince1970), .int(seq)])
-            let id = sqlite3_last_insert_rowid(db)
+            let id = database.lastInsertRowID
             for rep in kept {
                 try run("INSERT OR REPLACE INTO representations (clip_id, type, data) VALUES (?, ?, ?)",
                         [.int(id), .text(rep.type), .blob(rep.data)])
@@ -215,10 +195,6 @@ public final class HistoryStore {
 
     // MARK: - SQLite plumbing
 
-    private enum Value {
-        case int(Int64), double(Double), text(String), blob(Data)
-    }
-
     private static func hash(_ reps: [Representation]) -> Data {
         var hasher = SHA256()
         for rep in reps.sorted(by: { $0.type < $1.type }) {
@@ -233,65 +209,16 @@ public final class HistoryStore {
         Int64(try scalarInt("SELECT coalesce(max(seq), 0) + 1 FROM clips"))
     }
 
-    private func transaction<T>(_ body: () throws -> T) throws -> T {
-        try exec("BEGIN IMMEDIATE")
-        do {
-            let result = try body()
-            try exec("COMMIT")
-            return result
-        } catch {
-            try? exec("ROLLBACK")
-            throw error
-        }
-    }
+    private typealias Value = SQLiteDatabase.Value
 
-    private func exec(_ sql: String) throws {
-        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else { throw lastError() }
-    }
-
-    private func run(_ sql: String, _ values: [Value]) throws {
-        _ = try query(sql, values) { _ in () }
-    }
-
-    private func scalarInt(_ sql: String) throws -> Int {
-        Int(try query(sql, []) { sqlite3_column_int64($0, 0) }.first ?? 0)
-    }
-
+    private func transaction<T>(_ body: () throws -> T) throws -> T { try database.transaction(body) }
+    private func exec(_ sql: String) throws { try database.exec(sql) }
+    private func run(_ sql: String, _ values: [Value]) throws { try database.run(sql, values) }
+    private func scalarInt(_ sql: String) throws -> Int { try database.scalarInt(sql) }
     private func query<T>(_ sql: String, _ values: [Value], row: (OpaquePointer) -> T) throws -> [T] {
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { throw lastError() }
-        defer { sqlite3_finalize(stmt) }
-        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-        for (i, value) in values.enumerated() {
-            let index = Int32(i + 1)
-            switch value {
-            case .int(let v): sqlite3_bind_int64(stmt, index, v)
-            case .double(let v): sqlite3_bind_double(stmt, index, v)
-            case .text(let v): sqlite3_bind_text(stmt, index, v, -1, transient)
-            case .blob(let v):
-                _ = v.withUnsafeBytes { sqlite3_bind_blob(stmt, index, $0.baseAddress, Int32(v.count), transient) }
-            }
-        }
-        var rows: [T] = []
-        while true {
-            switch sqlite3_step(stmt) {
-            case SQLITE_ROW: rows.append(row(stmt))
-            case SQLITE_DONE: return rows
-            default: throw lastError()
-            }
-        }
+        try database.query(sql, values, row: row)
     }
 
-    private func lastError() -> SQLiteError {
-        SQLiteError(code: sqlite3_errcode(db), message: String(cString: sqlite3_errmsg(db)))
-    }
-
-    private static func text(_ stmt: OpaquePointer, _ column: Int32) -> String {
-        sqlite3_column_text(stmt, column).map { String(cString: $0) } ?? ""
-    }
-
-    private static func blob(_ stmt: OpaquePointer, _ column: Int32) -> Data {
-        guard let bytes = sqlite3_column_blob(stmt, column) else { return Data() }
-        return Data(bytes: bytes, count: Int(sqlite3_column_bytes(stmt, column)))
-    }
+    private static func text(_ stmt: OpaquePointer, _ column: Int32) -> String { SQLiteDatabase.text(stmt, column) }
+    private static func blob(_ stmt: OpaquePointer, _ column: Int32) -> Data { SQLiteDatabase.blob(stmt, column) }
 }

@@ -11,6 +11,6 @@ let package = Package(
     targets: [
         .target(name: "ClipHavenCore"),
         .executableTarget(name: "ClipHaven", dependencies: ["ClipHavenCore"]),
-        .testTarget(name: "ClipHavenCoreTests", dependencies: ["ClipHavenCore"]),
+        .testTarget(name: "ClipHavenCoreTests", dependencies: ["ClipHavenCore"], resources: [.copy("Fixtures")]),
     ]
 )

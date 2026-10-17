@@ -25,7 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.register(defaults: ["autoPaste": true])
             let paster = Paster(store: store, writer: pasteboard, poster: KeyPoster(),
                                 autoPaste: UserDefaults.standard.bool(forKey: "autoPaste"))
-            let controller = MenuController(store: store, paster: paster)
+            let snippets = try SnippetStore(url: store.url)
+            let controller = MenuController(store: store, snippets: snippets, paster: paster)
             menuController = controller
             registerHotKey()
             item.menu = controller.makeStatusMenu()

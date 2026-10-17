@@ -162,6 +162,12 @@ public final class SnippetStore {
         try database.query("\(Self.snippetColumns) FROM snippets WHERE id = ?", [.int(id)], row: Self.snippet(from:)).first
     }
 
+    /// How many snippets point at this Keychain item.
+    public func secretReferenceCount(_ ref: SecretRef) throws -> Int {
+        try database.query("SELECT count(*) FROM snippets WHERE secret_service = ? AND secret_account = ?",
+                           [.text(ref.service), .text(ref.account)]) { SQLiteDatabase.int($0, 0) }.first.map(Int.init) ?? 0
+    }
+
     public func folderCount() throws -> Int {
         try database.scalarInt("SELECT count(*) FROM snippet_folders")
     }

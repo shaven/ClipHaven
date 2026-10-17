@@ -111,6 +111,34 @@ public final class SecretPaster {
         return .pasted
     }
 
+    /// Deletes a snippet, and with `removingKeychainItem` its Keychain item too, unless another
+    /// snippet still points at that item. Returns whether an item was removed. The item goes
+    /// first, so a Keychain failure leaves the snippet in place.
+    @discardableResult
+    public func deleteSnippet(id: Int64, removingKeychainItem: Bool) throws -> Bool {
+        guard let snippet = try snippets.snippet(id: id) else { return false }
+        var removed = false
+        if removingKeychainItem, let ref = snippet.secret, try snippets.secretReferenceCount(ref) == 1 {
+            try secrets.remove(ref)
+            removed = true
+        }
+        try snippets.deleteSnippet(id: id)
+        return removed
+    }
+
+    /// Deletes a folder and its snippets; returns how many Keychain items were removed.
+    @discardableResult
+    public func deleteFolder(id: Int64, removingKeychainItems: Bool) throws -> Int {
+        var removed = 0
+        if removingKeychainItems, let folder = try snippets.folders().first(where: { $0.id == id }) {
+            for snippet in folder.snippets where snippet.secret != nil {
+                if try deleteSnippet(id: snippet.id, removingKeychainItem: true) { removed += 1 }
+            }
+        }
+        try snippets.deleteFolder(id: id)
+        return removed
+    }
+
     /// Stores the snippet's text in the Keychain under `ref`, then removes it from the snippet
     /// store. The Keychain write comes first: if it fails the text is still where it was.
     public func moveToKeychain(snippetID: Int64, as ref: SecretRef) throws {

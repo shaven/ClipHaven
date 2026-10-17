@@ -30,8 +30,11 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
     func show() {
         if window == nil { build() }
         reload()
-        NSApp.activate()
+        // The window can be hidden behind another app's; a status-menu click does not always
+        // activate us, so force both.
+        NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+        window?.orderFrontRegardless()
     }
 
     // MARK: - Window
@@ -246,11 +249,22 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
         selectedFolderID = try? store.addFolder(title: "untitled folder")
         selectedSnippetID = nil
         changed()
+        rename(folderTable)
     }
 
     @objc private func deleteFolder() {
-        guard let id = selectedFolderID else { return }
-        try? store.deleteFolder(id: id)
+        guard let id = selectedFolderID, let folder = selectedFolder else { return }
+        let keychainCount = folder.snippets.filter { $0.secret != nil }.count
+        var removeItems = false
+        if keychainCount > 0 {
+            switch askAboutKeychain(message: "Delete “\(folder.title)”?",
+                                    detail: "\(keychainCount) snippet(s) in this folder are stored in the Keychain. Delete those Keychain items too?") {
+            case .cancel: return
+            case .snippetAndItem: removeItems = true
+            case .snippetOnly: break
+            }
+        }
+        do { try secrets.deleteFolder(id: id, removingKeychainItems: removeItems) } catch { showError("Could not delete", "\(error)") }
         selectedFolderID = nil
         selectedSnippetID = nil
         changed()
@@ -261,11 +275,31 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
         saveContent()
         selectedSnippetID = try? store.addSnippet(folderID: folder, title: "untitled snippet", content: "")
         changed()
+        rename(snippetTable)
+    }
+
+    /// Puts the selected row's name into edit mode with the text selected, ready to type over.
+    private func rename(_ table: NSTableView) {
+        DispatchQueue.main.async {
+            let row = table.selectedRow
+            guard row >= 0 else { return }
+            table.window?.makeFirstResponder(table)
+            table.editColumn(1, row: row, with: nil, select: true)
+        }
     }
 
     @objc private func deleteSnippet() {
-        guard let id = selectedSnippetID else { return }
-        try? store.deleteSnippet(id: id)
+        guard let id = selectedSnippetID, let snippet = snippets.first(where: { $0.id == id }) else { return }
+        var removeItem = false
+        if let ref = snippet.secret {
+            switch askAboutKeychain(message: "Delete “\(snippet.title)”?",
+                                    detail: "Its password is in the Keychain as \(ref.service) / \(ref.account). Delete that Keychain item too? Keeping it leaves an unused item in the Keychain.") {
+            case .cancel: return
+            case .snippetAndItem: removeItem = true
+            case .snippetOnly: break
+            }
+        }
+        do { try secrets.deleteSnippet(id: id, removingKeychainItem: removeItem) } catch { showError("Could not delete", "\(error)") }
         selectedSnippetID = nil
         changed()
     }
@@ -320,6 +354,23 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
         guard alert.runModal() == .alertFirstButtonReturn,
               !serviceField.stringValue.isEmpty, !accountField.stringValue.isEmpty else { return nil }
         return SecretRef(service: serviceField.stringValue, account: accountField.stringValue)
+    }
+
+    private enum KeychainChoice { case snippetAndItem, snippetOnly, cancel }
+
+    private func askAboutKeychain(message: String, detail: String) -> KeychainChoice {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = message
+        alert.informativeText = detail
+        alert.addButton(withTitle: "Delete and Remove Keychain Item")
+        alert.addButton(withTitle: "Delete, Keep Keychain Item")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .snippetAndItem
+        case .alertSecondButtonReturn: return .snippetOnly
+        default: return .cancel
+        }
     }
 
     private func showError(_ message: String, _ detail: String) {

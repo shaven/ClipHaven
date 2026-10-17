@@ -84,3 +84,60 @@ final class LockTests: SecretTestCase {
         XCTAssertEqual(summaries.first { $0.id == plain }?.isLocked, false)
     }
 }
+
+final class DeleteSecretTests: SecretTestCase {
+    private let ref = SecretRef(service: "ClipHaven-test", account: "demo")
+
+    func testDeletingWithRemovalDeletesTheKeychainItemAndTheRow() throws {
+        let id = try keychainSnippet()
+        let removed = try paster().deleteSnippet(id: id, removingKeychainItem: true)
+        XCTAssertTrue(removed)
+        XCTAssertNil(secrets.items[ref])
+        XCTAssertNil(try snippets.snippet(id: id))
+    }
+
+    func testDeletingWithoutRemovalLeavesTheKeychainItem() throws {
+        let id = try keychainSnippet()
+        let removed = try paster().deleteSnippet(id: id, removingKeychainItem: false)
+        XCTAssertFalse(removed)
+        XCTAssertEqual(secrets.items[ref], fakeSecretValue)
+        XCTAssertNil(try snippets.snippet(id: id))
+    }
+
+    func testAnItemAnotherSnippetStillUsesIsKept() throws {
+        let first = try keychainSnippet()
+        let second = try snippets.addSnippet(folderID: folder, title: "same item", content: "")
+        try snippets.setSecret(id: second, ref)
+        let removed = try paster().deleteSnippet(id: first, removingKeychainItem: true)
+        XCTAssertFalse(removed)
+        XCTAssertEqual(secrets.items[ref], fakeSecretValue)
+        XCTAssertNotNil(try snippets.snippet(id: second))
+    }
+
+    func testAPlainSnippetJustDeletes() throws {
+        let id = try snippets.addSnippet(folderID: folder, title: "plain", content: "hello")
+        XCTAssertFalse(try paster().deleteSnippet(id: id, removingKeychainItem: true))
+        XCTAssertNil(try snippets.snippet(id: id))
+    }
+
+    func testDeletingAFolderCanRemoveItsKeychainItems() throws {
+        try keychainSnippet()
+        let removed = try paster().deleteFolder(id: folder, removingKeychainItems: true)
+        XCTAssertEqual(removed, 1)
+        XCTAssertTrue(secrets.items.isEmpty)
+        XCTAssertEqual(try snippets.folderCount(), 0)
+    }
+
+    func testKeychainFailureKeepsTheSnippet() throws {
+        final class Refusing: SecretProvider {
+            func read(_ ref: SecretRef) throws -> String? { "x" }
+            func store(_ value: String, as ref: SecretRef) throws {}
+            func remove(_ ref: SecretRef) throws { throw SQLiteError(code: 1, message: "refused") }
+        }
+        let id = try keychainSnippet()
+        let paster = SecretPaster(snippets: snippets, secrets: Refusing(), authenticator: auth, pasteboard: board,
+                                  poster: board, scheduler: scheduler)
+        XCTAssertThrowsError(try paster.deleteSnippet(id: id, removingKeychainItem: true))
+        XCTAssertNotNil(try snippets.snippet(id: id))
+    }
+}

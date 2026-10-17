@@ -147,7 +147,7 @@ final class MenuController: NSObject, NSMenuDelegate {
         guard let target = sender.representedObject as? MenuTarget else { return }
         switch target {
         case .clip(let id):
-            if NSApp.currentEvent?.modifierFlags.contains(.control) == true {
+            if Self.isActionClick() {
                 popUpActions(for: id)
             } else {
                 report { try paster.choose(clipID: id) }
@@ -155,6 +155,15 @@ final class MenuController: NSObject, NSMenuDelegate {
         case .snippet(let id):
             pasteSnippet(id)
         }
+    }
+
+    /// Control-click (or a right-click) on a clip opens its actions. macOS turns a Control-click on
+    /// a menu item into a right-click and the event can arrive without its Control flag, so the keys
+    /// held right now count as well as the event's own flags.
+    private static func isActionClick() -> Bool {
+        if NSEvent.modifierFlags.contains(.control) { return true }
+        guard let event = NSApp.currentEvent else { return false }
+        return event.modifierFlags.contains(.control) || event.type == .rightMouseUp || event.type == .rightMouseDown
     }
 
     /// A locked snippet asks for Touch ID first; an ordinary one is pasted like a clip.

@@ -3,8 +3,13 @@ import Foundation
 public struct Snippet: Equatable, Sendable {
     public let id: Int64
     public let title: String
+    /// Empty for a Keychain snippet: its value lives only in the Keychain.
     public let content: String
     public let enabled: Bool
+    public let secret: SecretRef?
+    public let requiresAuth: Bool
+
+    public var isLocked: Bool { secret != nil || requiresAuth }
 }
 
 public struct SnippetFolder: Equatable, Sendable {
@@ -44,6 +49,17 @@ public final class SnippetStore {
             );
             CREATE INDEX IF NOT EXISTS snippets_folder ON snippets (folder_id, position);
             """)
+        try addMissingColumns()
+    }
+
+    /// Phase 6 columns, added to a Phase 5 file in place. A Keychain snippet keeps only the
+    /// service and account here.
+    private func addMissingColumns() throws {
+        let existing = Set(try database.query("PRAGMA table_info(snippets)", []) { SQLiteDatabase.text($0, 1) })
+        for (name, definition) in [("secret_service", "TEXT"), ("secret_account", "TEXT"),
+                                   ("requires_auth", "INTEGER NOT NULL DEFAULT 0")] where !existing.contains(name) {
+            try database.exec("ALTER TABLE snippets ADD COLUMN \(name) \(definition)")
+        }
     }
 
     // MARK: - Writing
@@ -66,6 +82,16 @@ public final class SnippetStore {
     public func updateSnippet(id: Int64, title: String, content: String, enabled: Bool) throws {
         try database.run("UPDATE snippets SET title = ?, content = ?, enabled = ? WHERE id = ?",
                          [.text(title), .text(content), .int(enabled ? 1 : 0), .int(id)])
+    }
+
+    /// Makes the snippet a Keychain snippet and drops any plain-text content, in one statement.
+    public func setSecret(id: Int64, _ ref: SecretRef) throws {
+        try database.run("UPDATE snippets SET secret_service = ?, secret_account = ?, content = '' WHERE id = ?",
+                         [.text(ref.service), .text(ref.account), .int(id)])
+    }
+
+    public func setRequiresAuth(id: Int64, _ required: Bool) throws {
+        try database.run("UPDATE snippets SET requires_auth = ? WHERE id = ?", [.int(required ? 1 : 0), .int(id)])
     }
 
     public func deleteFolder(id: Int64) throws {
@@ -126,14 +152,12 @@ public final class SnippetStore {
     public func menuSummaries() throws -> [SnippetFolderSummary] {
         try folders().filter(\.enabled).map { folder in
             SnippetFolderSummary(title: folder.title,
-                                 snippets: folder.snippets.filter(\.enabled).map { SnippetSummary(id: $0.id, title: $0.title) })
+                                 snippets: folder.snippets.filter(\.enabled).map { SnippetSummary(id: $0.id, title: $0.title, isLocked: $0.isLocked) })
         }
     }
 
     public func snippet(id: Int64) throws -> Snippet? {
-        try database.query("SELECT id, title, content, enabled FROM snippets WHERE id = ?", [.int(id)]) {
-            Snippet(id: SQLiteDatabase.int($0, 0), title: SQLiteDatabase.text($0, 1), content: SQLiteDatabase.text($0, 2), enabled: SQLiteDatabase.int($0, 3) != 0)
-        }.first
+        try database.query("\(Self.snippetColumns) FROM snippets WHERE id = ?", [.int(id)], row: Self.snippet(from:)).first
     }
 
     public func folderCount() throws -> Int {
@@ -146,10 +170,19 @@ public final class SnippetStore {
 
     // MARK: - Plumbing
 
+    private static let snippetColumns = "SELECT id, title, content, enabled, secret_service, secret_account, requires_auth"
+
+    private static func snippet(from stmt: OpaquePointer) -> Snippet {
+        let service = SQLiteDatabase.text(stmt, 4)
+        let account = SQLiteDatabase.text(stmt, 5)
+        return Snippet(id: SQLiteDatabase.int(stmt, 0), title: SQLiteDatabase.text(stmt, 1),
+                       content: SQLiteDatabase.text(stmt, 2), enabled: SQLiteDatabase.int(stmt, 3) != 0,
+                       secret: service.isEmpty ? nil : SecretRef(service: service, account: account),
+                       requiresAuth: SQLiteDatabase.int(stmt, 6) != 0)
+    }
+
     private func snippets(in folderID: Int64) throws -> [Snippet] {
-        try database.query("SELECT id, title, content, enabled FROM snippets WHERE folder_id = ? ORDER BY position, id", [.int(folderID)]) {
-            Snippet(id: SQLiteDatabase.int($0, 0), title: SQLiteDatabase.text($0, 1), content: SQLiteDatabase.text($0, 2), enabled: SQLiteDatabase.int($0, 3) != 0)
-        }
+        try database.query("\(Self.snippetColumns) FROM snippets WHERE folder_id = ? ORDER BY position, id", [.int(folderID)], row: Self.snippet(from:))
     }
 
     private func insertFolder(title: String, enabled: Bool) throws -> Int64 {

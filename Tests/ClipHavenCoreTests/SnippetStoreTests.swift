@@ -39,7 +39,7 @@ final class SnippetStoreTests: XCTestCase {
         let folder = try XCTUnwrap(store.folders().first)
         XCTAssertEqual(folder.title, "A2")
         XCTAssertFalse(folder.enabled)
-        XCTAssertEqual(folder.snippets, [Snippet(id: s, title: "uno", content: "uno!", enabled: false)])
+        XCTAssertEqual(folder.snippets, [Snippet(id: s, title: "uno", content: "uno!", enabled: false, secret: nil, requiresAuth: false)])
     }
 
     func testDeletingAFolderDeletesItsSnippets() throws {

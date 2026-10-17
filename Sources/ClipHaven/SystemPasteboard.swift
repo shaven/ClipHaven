@@ -2,7 +2,7 @@ import AppKit
 import ClipHavenCore
 
 /// The general pasteboard, seen through `PasteboardSource` and `PasteboardWriter`.
-final class SystemPasteboard: PasteboardSource, PasteboardWriter {
+final class SystemPasteboard: PasteboardSource, SecretPasteboard {
     private let pasteboard: NSPasteboard
 
     init(_ pasteboard: NSPasteboard = .general) {
@@ -39,5 +39,18 @@ final class SystemPasteboard: PasteboardSource, PasteboardWriter {
         }
         pasteboard.clearContents()
         pasteboard.writeObjects(items)
+    }
+
+    /// The first item's types and data, to put back after a secret paste. A multi-item clip
+    /// comes back as its first item only.
+    func snapshot() -> [Representation] {
+        guard let item = pasteboard.pasteboardItems?.first else { return [] }
+        return item.types.compactMap { type in
+            item.data(forType: type).map { Representation(type: type.rawValue, data: $0) }
+        }
+    }
+
+    func clear() {
+        pasteboard.clearContents()
     }
 }

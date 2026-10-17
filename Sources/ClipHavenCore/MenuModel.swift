@@ -21,10 +21,13 @@ public enum MenuTarget: Hashable, Sendable {
 public struct MenuItemEntry: Equatable, Sendable {
     public let target: MenuTarget
     public let title: String
+    /// Shown with a lock: pasting it asks for Touch ID first.
+    public let isLocked: Bool
 
-    public init(target: MenuTarget, title: String) {
+    public init(target: MenuTarget, title: String, isLocked: Bool = false) {
         self.target = target
         self.title = title
+        self.isLocked = isLocked
     }
 }
 
@@ -38,10 +41,13 @@ public enum MenuEntry: Equatable, Sendable {
 public struct SnippetSummary: Equatable, Sendable {
     public let id: Int64
     public let title: String
+    /// A Keychain snippet, or one flagged "Require Touch ID": pasting it asks first.
+    public let isLocked: Bool
 
-    public init(id: Int64, title: String) {
+    public init(id: Int64, title: String, isLocked: Bool = false) {
         self.id = id
         self.title = title
+        self.isLocked = isLocked
     }
 }
 
@@ -61,7 +67,7 @@ public enum MenuModel {
     public static func build(clips: [ClipSummary], snippetFolders: [SnippetFolderSummary], layout: MenuLayout) -> [MenuEntry] {
         var entries: [MenuEntry] = snippetFolders.map { folder in
             .folder(title: trim(folder.title, to: layout.titleLength),
-                    items: folder.snippets.map { MenuItemEntry(target: .snippet($0.id), title: trim($0.title, to: layout.titleLength)) })
+                    items: folder.snippets.map { MenuItemEntry(target: .snippet($0.id), title: trim($0.title, to: layout.titleLength), isLocked: $0.isLocked) })
         }
         if !entries.isEmpty, !clips.isEmpty { entries.append(.separator) }
 

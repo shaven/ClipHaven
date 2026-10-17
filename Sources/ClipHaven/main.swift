@@ -26,7 +26,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let paster = Paster(store: store, writer: pasteboard, poster: KeyPoster(),
                                 autoPaste: UserDefaults.standard.bool(forKey: "autoPaste"))
             let snippets = try SnippetStore(url: store.url)
-            let controller = MenuController(store: store, snippets: snippets, paster: paster)
+            let authenticator = TouchIDAuthenticator()
+            let secretPaster = SecretPaster(snippets: snippets, secrets: KeychainProvider(authenticator: authenticator),
+                                            authenticator: authenticator, pasteboard: pasteboard, poster: KeyPoster(),
+                                            scheduler: MainScheduler(),
+                                            autoPaste: UserDefaults.standard.bool(forKey: "autoPaste"))
+            let controller = MenuController(store: store, snippets: snippets, paster: paster, secretPaster: secretPaster)
             menuController = controller
             registerHotKey()
             item.menu = controller.makeStatusMenu()

@@ -9,15 +9,17 @@ final class MenuController: NSObject, NSMenuDelegate {
     private let store: HistoryStore
     private let snippets: SnippetStore
     private let paster: Paster
-    private lazy var editor = SnippetEditor(store: snippets) {}
+    private let secretPaster: SecretPaster
+    private lazy var editor = SnippetEditor(store: snippets, secrets: secretPaster) {}
     var layout = MenuLayout()
     /// Shown in the status menu, e.g. "Hotkey: ⌃⌘V".
     var hotKeyNote: String?
 
-    init(store: HistoryStore, snippets: SnippetStore, paster: Paster) {
+    init(store: HistoryStore, snippets: SnippetStore, paster: Paster, secretPaster: SecretPaster) {
         self.store = store
         self.snippets = snippets
         self.paster = paster
+        self.secretPaster = secretPaster
     }
 
     /// The status item's menu; rebuilt each time it opens.
@@ -79,6 +81,9 @@ final class MenuController: NSObject, NSMenuDelegate {
         if case .clip(let id) = entry.target, let type = types[id] {
             item.image = Self.icon(for: type)
         }
+        if entry.isLocked {
+            item.image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: "Locked")
+        }
         return item
     }
 
@@ -100,8 +105,29 @@ final class MenuController: NSObject, NSMenuDelegate {
                 report { try paster.choose(clipID: id) }
             }
         case .snippet(let id):
-            guard let snippet = try? snippets.snippet(id: id) else { return }
-            paster.paste([Representation(type: ClipType.string.pasteboardType, data: Data(snippet.content.utf8))])
+            pasteSnippet(id)
+        }
+    }
+
+    /// A locked snippet asks for Touch ID first; an ordinary one is pasted like a clip.
+    private func pasteSnippet(_ id: Int64) {
+        do {
+            switch try secretPaster.paste(snippetID: id) {
+            case .notLocked:
+                guard let snippet = try snippets.snippet(id: id) else { return }
+                paster.paste([Representation(type: ClipType.string.pasteboardType, data: Data(snippet.content.utf8))])
+            case .missing:
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = "Keychain item not found"
+                alert.informativeText = "The item this snippet points to is not in the Keychain. Open Edit Snippets… to move or link it again."
+                NSApp.activate()
+                alert.runModal()
+            case .pasted, .cancelled, .notFound:
+                break
+            }
+        } catch {
+            NSLog("ClipHaven: locked snippet failed: \(error)")
         }
     }
 

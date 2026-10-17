@@ -6,6 +6,7 @@ import ClipHavenCore
 @MainActor
 final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextViewDelegate {
     private let store: SnippetStore
+    private let secrets: SecretPaster
     private let onChange: () -> Void
     private var folders: [SnippetFolder] = []
     private var selectedFolderID: Int64?
@@ -15,9 +16,14 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
     private let folderTable = NSTableView()
     private let snippetTable = NSTableView()
     private let contentView = NSTextView()
+    private let requireAuthBox = NSButton(checkboxWithTitle: "Require Touch ID", target: nil, action: nil)
+    private let keychainNote = NSTextField(labelWithString: "")
+    private let moveButton = NSButton(title: "Move to Keychain…", target: nil, action: nil)
+    private let linkButton = NSButton(title: "Use Keychain Item…", target: nil, action: nil)
 
-    init(store: SnippetStore, onChange: @escaping () -> Void) {
+    init(store: SnippetStore, secrets: SecretPaster, onChange: @escaping () -> Void) {
         self.store = store
+        self.secrets = secrets
         self.onChange = onChange
     }
 
@@ -56,10 +62,27 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
         contentScroll.hasVerticalScroller = true
         contentScroll.borderType = .bezelBorder
 
+        requireAuthBox.target = self
+        requireAuthBox.action = #selector(toggleRequireAuth)
+        moveButton.target = self
+        moveButton.action = #selector(moveToKeychain)
+        linkButton.target = self
+        linkButton.action = #selector(linkKeychainItem)
+        keychainNote.textColor = .secondaryLabelColor
+        keychainNote.lineBreakMode = .byTruncatingMiddle
+        let lockRow = NSStackView(views: [requireAuthBox, moveButton, linkButton])
+        lockRow.spacing = 8
+        let rightColumn = NSStackView(views: [contentScroll, keychainNote, lockRow])
+        rightColumn.orientation = .vertical
+        rightColumn.alignment = .leading
+        rightColumn.spacing = 6
+        contentScroll.widthAnchor.constraint(equalTo: rightColumn.widthAnchor).isActive = true
+        contentScroll.setContentHuggingPriority(.defaultLow, for: .vertical)
+
         let panes = NSStackView(views: [
             pane(folderTable, add: #selector(addFolder), remove: #selector(deleteFolder), up: #selector(moveFolderUp), down: #selector(moveFolderDown)),
             pane(snippetTable, add: #selector(addSnippet), remove: #selector(deleteSnippet), up: #selector(moveSnippetUp), down: #selector(moveSnippetDown)),
-            contentScroll,
+            rightColumn,
         ])
         panes.orientation = .horizontal
         panes.distribution = .fill
@@ -140,13 +163,24 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
 
     private func showContent() {
         let snippet = snippets.first { $0.id == selectedSnippetID }
+        let isSecret = snippet?.secret != nil
         contentView.string = snippet?.content ?? ""
-        contentView.isEditable = snippet != nil
+        contentView.isEditable = snippet != nil && !isSecret
+        requireAuthBox.isEnabled = snippet != nil && !isSecret
+        requireAuthBox.state = (snippet?.requiresAuth ?? false) || isSecret ? .on : .off
+        moveButton.isEnabled = snippet != nil && !isSecret
+        linkButton.isEnabled = snippet != nil && (snippet?.content.isEmpty ?? false) && !isSecret
+        if let ref = snippet?.secret {
+            keychainNote.stringValue = "In the Keychain: \(ref.service) / \(ref.account). Touch ID on every paste."
+        } else {
+            keychainNote.stringValue = ""
+        }
     }
 
     /// Writes the text pane back to the selected snippet.
     private func saveContent() {
-        guard let snippet = snippets.first(where: { $0.id == selectedSnippetID }), snippet.content != contentView.string else { return }
+        guard let snippet = snippets.first(where: { $0.id == selectedSnippetID }), snippet.secret == nil,
+              snippet.content != contentView.string else { return }
         try? store.updateSnippet(id: snippet.id, title: snippet.title, content: contentView.string, enabled: snippet.enabled)
         folders = (try? store.folders()) ?? folders
     }
@@ -234,6 +268,66 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
         try? store.deleteSnippet(id: id)
         selectedSnippetID = nil
         changed()
+    }
+
+    @objc private func toggleRequireAuth() {
+        guard let id = selectedSnippetID else { return }
+        try? store.setRequiresAuth(id: id, requireAuthBox.state == .on)
+        changed()
+    }
+
+    /// Stores the snippet's text in the Keychain and removes it from ClipHaven's own database.
+    @objc private func moveToKeychain() {
+        saveContent()
+        guard let snippet = snippets.first(where: { $0.id == selectedSnippetID }),
+              let ref = askForItem(message: "Move “\(snippet.title)” to the Keychain?",
+                                   detail: "The text is stored in the Keychain and deleted from ClipHaven. Every paste will ask for Touch ID.",
+                                   service: "ClipHaven", account: snippet.title, button: "Move") else { return }
+        do {
+            try secrets.moveToKeychain(snippetID: snippet.id, as: ref)
+        } catch {
+            showError("The Keychain refused the item", "\(error)")
+        }
+        changed()
+    }
+
+    /// Points an empty snippet at a Keychain item that already exists.
+    @objc private func linkKeychainItem() {
+        guard let snippet = snippets.first(where: { $0.id == selectedSnippetID }),
+              let ref = askForItem(message: "Use a Keychain item for “\(snippet.title)”?",
+                                   detail: "Enter the service and account of an existing generic password. Only those two names are stored.",
+                                   service: "", account: "", button: "Use Item") else { return }
+        try? store.setSecret(id: snippet.id, ref)
+        changed()
+    }
+
+    private func askForItem(message: String, detail: String, service: String, account: String, button: String) -> SecretRef? {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = detail
+        let serviceField = NSTextField(string: service)
+        let accountField = NSTextField(string: account)
+        serviceField.placeholderString = "Service"
+        accountField.placeholderString = "Account"
+        let fields = NSStackView(views: [serviceField, accountField])
+        fields.orientation = .vertical
+        fields.frame = NSRect(x: 0, y: 0, width: 300, height: 52)
+        serviceField.widthAnchor.constraint(equalToConstant: 300).isActive = true
+        accountField.widthAnchor.constraint(equalToConstant: 300).isActive = true
+        alert.accessoryView = fields
+        alert.addButton(withTitle: button)
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn,
+              !serviceField.stringValue.isEmpty, !accountField.stringValue.isEmpty else { return nil }
+        return SecretRef(service: serviceField.stringValue, account: accountField.stringValue)
+    }
+
+    private func showError(_ message: String, _ detail: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = message
+        alert.informativeText = detail
+        alert.runModal()
     }
 
     @objc private func moveFolderUp() { moveFolder(by: -1) }

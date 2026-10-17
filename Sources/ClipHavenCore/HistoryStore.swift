@@ -117,6 +117,41 @@ public final class HistoryStore {
         }
     }
 
+    public enum OlderInsert: Equatable, Sendable {
+        case inserted
+        case duplicate
+        /// Nothing storable was left (an image over the cap, say).
+        case empty
+        /// History is at its size limit; an older clip has no room.
+        case full
+    }
+
+    /// Stores a clip below everything already in history, for importing an older history. A clip
+    /// already there is left where it is. A full history takes no more: the current clips are
+    /// never pushed out by old ones.
+    public func insertOlder(_ representations: [Representation], title: String, created: Date) throws -> OlderInsert {
+        let kept = representations.filter {
+            !Self.imageTypes.contains($0.type) || $0.data.count <= limits.maxImageBytes
+        }
+        guard !kept.isEmpty else { return .empty }
+        let hash = Self.hash(kept)
+        return try transaction {
+            if try query("SELECT id FROM clips WHERE hash = ?", [.blob(hash)], row: { sqlite3_column_int64($0, 0) }).first != nil {
+                return .duplicate
+            }
+            guard try count() < limits.maxCount else { return .full }
+            let seq = Int64(try scalarInt("SELECT coalesce(min(seq), 1) - 1 FROM clips"))
+            try run("INSERT INTO clips (hash, title, created, seq) VALUES (?, ?, ?, ?)",
+                    [.blob(hash), .text(title), .double(created.timeIntervalSince1970), .int(seq)])
+            let id = database.lastInsertRowID
+            for rep in kept {
+                try run("INSERT OR REPLACE INTO representations (clip_id, type, data) VALUES (?, ?, ?)",
+                        [.int(id), .text(rep.type), .blob(rep.data)])
+            }
+            return .inserted
+        }
+    }
+
     public func delete(id: Int64) throws {
         try run("DELETE FROM clips WHERE id = ?", [.int(id)])
     }

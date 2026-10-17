@@ -103,6 +103,7 @@ final class MenuController: NSObject, NSMenuDelegate {
         let submenu = NSMenu(title: tools.title)
         submenu.addItem(actionItem("Import ClipMenu Snippets…", #selector(importClipMenuSnippets)))
         submenu.addItem(actionItem("Import ClipMenu Actions…", #selector(importClipMenuActions)))
+        submenu.addItem(actionItem("Import ClipMenu History…", #selector(importClipMenuHistory)))
         submenu.addItem(.separator())
         submenu.addItem(actionItem("Sync Snippets with iCloud Keychain…", #selector(syncSnippets)))
         submenu.addItem(.separator())
@@ -242,6 +243,35 @@ final class MenuController: NSObject, NSMenuDelegate {
         nodes.reduce(0) { total, node in
             if case .folder(let children) = node.kind { return total + countActions(children) }
             return total + 1
+        }
+    }
+
+    /// Adds ClipMenu's old clipboard history below the current clips. It runs in a child process.
+    @objc private func importClipMenuHistory() {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let source = support.appendingPathComponent("ClipMenu/clips.data")
+        NSApp.activate()
+        guard FileManager.default.fileExists(atPath: source.path) else {
+            show("No ClipMenu history found", "Looked for \(source.path).")
+            return
+        }
+        let ask = NSAlert()
+        ask.messageText = "Import ClipMenu's clipboard history?"
+        ask.informativeText = "ClipMenu's clips are added below the ones ClipHaven already has, in ClipMenu's order. Clips already here are skipped, and nothing is replaced. Images over the size limit are stored as PNG when that fits. The file is large, so this can take a minute."
+        ask.addButton(withTitle: "Import")
+        ask.addButton(withTitle: "Cancel")
+        guard ask.runModal() == .alertFirstButtonReturn else { return }
+
+        let database = store.url
+        Task {
+            switch await HistoryImportMode.run(source: source, database: database, limit: nil) {
+            case .success(let counts):
+                var detail = "Skipped \(counts.duplicates) already here and \(counts.skipped) with nothing storable (images over the limit even as PNG)."
+                if counts.stoppedFull { detail += " History reached its size limit, so the oldest clips were left out." }
+                show("Imported \(counts.imported) clips", detail)
+            case .failure(let failure):
+                show("Import failed", failure.message)
+            }
         }
     }
 

@@ -189,6 +189,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+HistoryImportMode.runIfRequested()
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

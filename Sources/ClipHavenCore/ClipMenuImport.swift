@@ -4,11 +4,16 @@ public struct ImportedSnippet: Equatable, Sendable {
     public let title: String
     public let content: String
     public let enabled: Bool
+    /// Set when the snippet's value lives in the Keychain; `content` is then empty.
+    public let secret: SecretRef?
+    public let requiresAuth: Bool
 
-    public init(title: String, content: String, enabled: Bool) {
+    public init(title: String, content: String, enabled: Bool, secret: SecretRef? = nil, requiresAuth: Bool = false) {
         self.title = title
         self.content = content
         self.enabled = enabled
+        self.secret = secret
+        self.requiresAuth = requiresAuth
     }
 }
 

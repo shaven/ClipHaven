@@ -128,7 +128,9 @@ public final class SnippetStore {
             for folder in folders {
                 let id = try insertFolder(title: folder.title, enabled: folder.enabled)
                 for snippet in folder.snippets {
-                    try insertSnippet(folderID: id, title: snippet.title, content: snippet.content, enabled: snippet.enabled)
+                    let snippetID = try insertSnippet(folderID: id, title: snippet.title, content: snippet.content, enabled: snippet.enabled)
+                    if let secret = snippet.secret { try setSecret(id: snippetID, secret) }
+                    if snippet.requiresAuth { try setRequiresAuth(id: snippetID, true) }
                     snippetCount += 1
                 }
             }

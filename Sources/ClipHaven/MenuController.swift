@@ -68,6 +68,8 @@ final class MenuController: NSObject, NSMenuDelegate {
         menu.addItem(actionItem("Clear History…", #selector(clearHistory)))
         menu.addItem(actionItem("Edit Snippets…", #selector(editSnippets)))
         menu.addItem(actionItem("Import ClipMenu Snippets…", #selector(importClipMenuSnippets)))
+        menu.addItem(actionItem("Export…", #selector(exportAll)))
+        menu.addItem(actionItem("Import…", #selector(importAll)))
         menu.addItem(.separator())
         let about = NSMenuItem(title: "ClipHaven \(ClipHaven.version)", action: nil, keyEquivalent: "")
         menu.addItem(about)
@@ -193,6 +195,41 @@ final class MenuController: NSObject, NSMenuDelegate {
             done.informativeText = "\(error)"
         }
         done.runModal()
+    }
+
+    /// Writes history and snippets to a JSON file. Keychain snippets go out as service and account only.
+    @objc private func exportAll() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "ClipHaven Export.json"
+        panel.allowedContentTypes = [.json]
+        NSApp.activate()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try Export.data(history: store, snippets: snippets).write(to: url, options: .atomic)
+        } catch {
+            show("Export failed", "\(error)")
+        }
+    }
+
+    /// Adds the contents of an export file to the current history and snippets; nothing is replaced.
+    @objc private func importAll() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        NSApp.activate()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let counts = try Export.restore(Data(contentsOf: url), history: store, snippets: snippets)
+            show("Imported \(counts.clips) clips, \(counts.folders) folders and \(counts.snippets) snippets", "Nothing was replaced.")
+        } catch {
+            show("Import failed", "\(error)")
+        }
+    }
+
+    private func show(_ message: String, _ detail: String) {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = detail
+        alert.runModal()
     }
 
     private func report(_ body: () throws -> Void) {

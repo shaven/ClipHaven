@@ -10,6 +10,10 @@ final class MenuController: NSObject, NSMenuDelegate {
     private let snippets: SnippetStore
     private let paster: Paster
     private let secretPaster: SecretPaster
+    private let actions: ActionService
+    private let actionStore: ActionStore
+    private let scriptsFolder: URL
+    private let actionFolders: [URL]
     private lazy var editor = SnippetEditor(store: snippets, secrets: secretPaster) {}
     var layout = MenuLayout()
     /// Opens the Preferences window; set by the app delegate.
@@ -17,7 +21,12 @@ final class MenuController: NSObject, NSMenuDelegate {
     /// Shown in the status menu, e.g. "Hotkey: ⌃⌘V".
     var hotKeyNote: String?
 
-    init(store: HistoryStore, snippets: SnippetStore, paster: Paster, secretPaster: SecretPaster) {
+    init(store: HistoryStore, snippets: SnippetStore, paster: Paster, secretPaster: SecretPaster,
+         actions: ActionService, actionStore: ActionStore, scriptsFolder: URL, actionFolders: [URL]) {
+        self.actions = actions
+        self.actionStore = actionStore
+        self.scriptsFolder = scriptsFolder
+        self.actionFolders = actionFolders
         self.store = store
         self.snippets = snippets
         self.paster = paster
@@ -71,6 +80,8 @@ final class MenuController: NSObject, NSMenuDelegate {
         menu.addItem(actionItem("Edit Snippets…", #selector(editSnippets)))
         menu.addItem(actionItem("Preferences…", #selector(openPreferences)))
         menu.addItem(actionItem("Import ClipMenu Snippets…", #selector(importClipMenuSnippets)))
+        menu.addItem(actionItem("Import ClipMenu Actions…", #selector(importClipMenuActions)))
+        menu.addItem(actionItem("Open Scripts Folder", #selector(openScriptsFolder)))
         menu.addItem(actionItem("Export…", #selector(exportAll)))
         menu.addItem(actionItem("Import…", #selector(importAll)))
         menu.addItem(.separator())
@@ -136,23 +147,79 @@ final class MenuController: NSObject, NSMenuDelegate {
         }
     }
 
+    /// The saved action list, or the default one (built-ins plus every script found).
+    private func actionTree() -> [ActionNode] {
+        if let saved = try? actionStore.load() { return saved }
+        return ActionList.defaultTree(scripts: ActionList.discoverScripts(in: actionFolders))
+    }
+
     private func popUpActions(for id: Int64) {
         guard let clip = try? store.clip(id: id) else { return }
         let menu = NSMenu(title: "Actions")
-        for action in ClipAction.available(for: clip.representations) {
-            let item = actionItem(action.title, #selector(runAction(_:)))
-            item.representedObject = ActionChoice(action: action, clipID: id)
-            menu.addItem(item)
-        }
+        addActions(ActionList.visible(actionTree(), for: clip.representations), to: menu, clipID: id)
         // Pop after the current menu has closed.
         DispatchQueue.main.async {
             menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
         }
     }
 
+    private func addActions(_ nodes: [ActionNode], to menu: NSMenu, clipID: Int64) {
+        for node in nodes {
+            if case .folder(let children) = node.kind {
+                let folder = NSMenuItem(title: node.title, action: nil, keyEquivalent: "")
+                folder.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+                let submenu = NSMenu(title: node.title)
+                addActions(children, to: submenu, clipID: clipID)
+                folder.submenu = submenu
+                menu.addItem(folder)
+            } else {
+                let item = actionItem(node.title, #selector(runAction(_:)))
+                item.representedObject = ActionChoice(node: node, clipID: clipID)
+                if case .script = node.kind { item.image = NSImage(systemSymbolName: "curlybraces", accessibilityDescription: nil) }
+                menu.addItem(item)
+            }
+        }
+    }
+
     @objc private func runAction(_ sender: NSMenuItem) {
         guard let choice = sender.representedObject as? ActionChoice else { return }
-        report { try paster.perform(choice.action, clipID: choice.clipID) }
+        Task {
+            do {
+                try await actions.perform(choice.node, clipID: choice.clipID)
+            } catch {
+                show("\(choice.node.title) failed", "\(error)")
+            }
+        }
+    }
+
+    /// Replaces the action list with ClipMenu's `actions.plist`, after backing it up.
+    @objc private func importClipMenuActions() {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let source = support.appendingPathComponent("ClipMenu/actions.plist")
+        let backups = support.appendingPathComponent("ClipHaven/backups", isDirectory: true)
+        NSApp.activate()
+        do {
+            let result = try ActionList.importFile(at: source, backupDirectory: backups)
+            try actionStore.save(result.tree)
+            show("Imported \(Self.countActions(result.tree)) actions", "ClipMenu's file was copied to \(result.backup.path) first. The action list was replaced.")
+        } catch {
+            show("Import failed", "\(error)")
+        }
+    }
+
+    private static func countActions(_ nodes: [ActionNode]) -> Int {
+        nodes.reduce(0) { total, node in
+            if case .folder(let children) = node.kind { return total + countActions(children) }
+            return total + 1
+        }
+    }
+
+    /// Your own scripts go in `action/` (the menu entries) and `lib/` (helpers for `ClipMenu.require`).
+    @objc private func openScriptsFolder() {
+        for sub in ["action", "lib"] {
+            try? FileManager.default.createDirectory(at: scriptsFolder.appendingPathComponent(sub), withIntermediateDirectories: true)
+        }
+        NSWorkspace.shared.open(scriptsFolder)
     }
 
     @objc private func clearHistory() {
@@ -258,11 +325,11 @@ final class MenuController: NSObject, NSMenuDelegate {
 }
 
 private final class ActionChoice: NSObject {
-    let action: ClipAction
+    let node: ActionNode
     let clipID: Int64
 
-    init(action: ClipAction, clipID: Int64) {
-        self.action = action
+    init(node: ActionNode, clipID: Int64) {
+        self.node = node
         self.clipID = clipID
     }
 }

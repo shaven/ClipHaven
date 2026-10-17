@@ -36,8 +36,19 @@ public struct ScriptRunner: Sendable {
         self.activate = activate
     }
 
+    /// `run` on a background queue, so a script waiting on `prompt()` leaves the caller's thread
+    /// (the main thread, in the app) free to show the question.
+    public func runAsync(_ script: URL, clipText: String) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global().async {
+                continuation.resume(with: Result { try self.run(script, clipText: clipText) })
+            }
+        }
+    }
+
     /// Runs the script file. JavaScriptCore has no public way to stop a script, so one that
-    /// runs past `timeout` is abandoned on its own thread and the caller gets `.timedOut`.
+    /// runs past `timeout` is abandoned on its own thread and the caller gets `.timedOut`. Time
+    /// spent waiting for the owner to answer `prompt()` does not count.
     public func run(_ script: URL, clipText: String) throws -> String {
         guard let source = try? String(contentsOf: script, encoding: .utf8) else {
             throw ScriptError.unreadable(script.lastPathComponent)
@@ -45,13 +56,21 @@ public struct ScriptRunner: Sendable {
         let box = Outcome()
         let done = DispatchSemaphore(value: 0)
         let folders = libFolders, prompt = prompt, activate = activate
+        let timed: @Sendable (String) -> String? = { text in
+            box.promptOpened()
+            defer { box.promptClosed() }
+            return prompt(text)
+        }
         let thread = Thread {
-            box.set(Self.evaluate(source, clipText: clipText, libFolders: folders, prompt: prompt, activate: activate))
+            box.set(Self.evaluate(source, clipText: clipText, libFolders: folders, prompt: timed, activate: activate))
             done.signal()
         }
         thread.stackSize = 8 << 20
         thread.start()
-        guard done.wait(timeout: .now() + timeout) == .success else { throw ScriptError.timedOut }
+        let start = Date()
+        while done.wait(timeout: .now() + 0.02) != .success {
+            if Date().timeIntervalSince(start) - box.promptSeconds() > timeout { throw ScriptError.timedOut }
+        }
         return try box.get()
     }
 
@@ -103,6 +122,21 @@ public struct ScriptRunner: Sendable {
 private final class Outcome: @unchecked Sendable {
     private let lock = NSLock()
     private var result: Result<String, ScriptError>?
+
+    private var promptTotal: TimeInterval = 0
+    private var promptSince: Date?
+
+    func promptOpened() { lock.withLock { promptSince = Date() } }
+    func promptClosed() {
+        lock.withLock {
+            if let since = promptSince { promptTotal += Date().timeIntervalSince(since) }
+            promptSince = nil
+        }
+    }
+    /// Seconds spent in `prompt()` so far, including one still open.
+    func promptSeconds() -> TimeInterval {
+        lock.withLock { promptTotal + (promptSince.map { Date().timeIntervalSince($0) } ?? 0) }
+    }
 
     func set(_ value: Result<String, ScriptError>) { lock.withLock { result = value } }
     func get() throws -> String { try lock.withLock { try result!.get() } }

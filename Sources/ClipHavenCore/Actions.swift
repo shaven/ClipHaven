@@ -1,21 +1,44 @@
 import AppKit
 
-/// ClipMenu's two built-in actions, offered on Control-click. Its JavaScript actions are out of
-/// scope until they are listed.
-public enum ClipAction: String, CaseIterable, Sendable {
+/// ClipMenu's four built-in actions, offered on Control-click. Its JavaScript actions are
+/// `ActionNode.Kind.script`, run by `ActionService`.
+public enum ClipAction: String, CaseIterable, Sendable, Codable {
     case pasteAsPlainText
     case remove
+    case pasteAsFilePath
+    case pasteAsHFSFilePath
+
+    /// The name ClipMenu's `actions.plist` uses, e.g. `pasteAsPlainText:`.
+    public init?(clipMenuName: String) {
+        guard let match = Self.allCases.first(where: { $0.rawValue + ":" == clipMenuName }) else { return nil }
+        self = match
+    }
 
     public var title: String {
         switch self {
         case .pasteAsPlainText: "Paste as Plain Text"
         case .remove: "Remove"
+        case .pasteAsFilePath: "Paste as File Path"
+        case .pasteAsHFSFilePath: "Paste as HFS File Path"
         }
     }
 
     /// The actions that make sense for a clip: plain text only when it has text to give.
     public static func available(for representations: [Representation]) -> [ClipAction] {
-        allCases.filter { $0 != .pasteAsPlainText || plainText(of: representations) != nil }
+        allCases.filter { action in
+            switch action {
+            case .pasteAsPlainText: plainText(of: representations) != nil
+            case .remove: true
+            case .pasteAsFilePath, .pasteAsHFSFilePath: fileURLs(of: representations) != nil
+            }
+        }
+    }
+
+    /// The files of a Filenames clip (stored one URL per line), or nil when it has none.
+    public static func fileURLs(of representations: [Representation]) -> [URL]? {
+        guard let rep = representations.first(where: { $0.type == ClipType.filenames.pasteboardType }) else { return nil }
+        let urls = String(decoding: rep.data, as: UTF8.self).split(separator: "\n").compactMap { URL(string: String($0)) }
+        return urls.isEmpty ? nil : urls
     }
 
     /// The clip reduced to one plain-text representation, or nil when it has no text. RTF and

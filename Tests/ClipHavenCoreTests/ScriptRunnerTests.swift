@@ -9,9 +9,10 @@ final class ScriptRunnerTests: XCTestCase {
         .appendingPathComponent("Resources/script")
 
     private func runner(prompt: @escaping @Sendable (String) -> String? = { _ in nil },
+                        activate: @escaping @Sendable () -> Void = {},
                         user: URL? = nil, timeout: TimeInterval = 5) -> ScriptRunner {
         ScriptRunner(libFolders: (user.map { [$0.appendingPathComponent("lib")] } ?? []) + [Self.bundled.appendingPathComponent("lib")],
-                     timeout: timeout, prompt: prompt)
+                     timeout: timeout, prompt: prompt, activate: activate)
     }
 
     private func action(_ path: String) -> URL {
@@ -77,11 +78,22 @@ final class ScriptRunnerTests: XCTestCase {
     func testSlowScriptTimesOut() throws {
         let dir = try scratch()
         let script = dir.appendingPathComponent("slow.js")
-        try "prompt('wait'); return clipText;".write(to: script, atomically: true, encoding: .utf8)
-        let slow = runner(prompt: { _ in Thread.sleep(forTimeInterval: 1.5); return "x" }, timeout: 0.3)
+        try "ClipMenu.activate(); return clipText;".write(to: script, atomically: true, encoding: .utf8)
+        let slow = runner(activate: { Thread.sleep(forTimeInterval: 1.5) }, timeout: 0.3)
         XCTAssertThrowsError(try slow.run(script, clipText: "x")) { error in
             XCTAssertEqual(error as? ScriptError, .timedOut)
         }
+    }
+
+    func testTimeSpentAnsweringAPromptDoesNotCount() throws {
+        let tags = action("HTML/Surround with Tags....js")
+        let slowAnswer = runner(prompt: { _ in Thread.sleep(forTimeInterval: 0.8); return "b" }, timeout: 0.3)
+        XCTAssertEqual(try slowAnswer.run(tags, clipText: "x"), "<b>x</b>")
+    }
+
+    func testRunAsyncGivesTheSameResult() async throws {
+        let result = try await runner().runAsync(action("Reverse.js"), clipText: "abc")
+        XCTAssertEqual(result, "cba")
     }
 
     func testUserScriptAndUserLibraryShadowBundled() throws {

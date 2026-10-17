@@ -38,7 +38,30 @@ public final class Paster {
         case .pasteAsPlainText:
             guard let clip = try store.clip(id: clipID), let plain = ClipAction.plainText(of: clip.representations) else { return }
             paste(plain)
+        case .pasteAsFilePath:
+            guard let clip = try store.clip(id: clipID), let urls = ClipAction.fileURLs(of: clip.representations) else { return }
+            pasteString(urls.map(\.path).joined(separator: "\n"))
+        case .pasteAsHFSFilePath:
+            guard let clip = try store.clip(id: clipID), let urls = ClipAction.fileURLs(of: clip.representations) else { return }
+            pasteString(urls.map(Self.hfsPath).joined(separator: "\n"))
         }
+    }
+
+    /// `Macintosh HD:Users:me:file.txt` for `/Users/me/file.txt`; the volume is the first
+    /// component of a `/Volumes/` path, else the startup disk. (Carbon's own conversion is gone.)
+    static func hfsPath(_ url: URL) -> String {
+        var parts = url.path.split(separator: "/").map(String.init)
+        var volume = (try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeNameKey]).volumeName) ?? "Macintosh HD"
+        if parts.count > 1, parts[0] == "Volumes" {
+            volume = parts[1]
+            parts.removeFirst(2)
+        }
+        return ([volume] + parts).joined(separator: ":")
+    }
+
+    /// Pastes `text` as a plain string.
+    public func pasteString(_ text: String) {
+        paste([Representation(type: ClipType.string.pasteboardType, data: Data(text.utf8))])
     }
 
     /// Writes `representations`, marked as ClipHaven's own so the monitor skips them, then

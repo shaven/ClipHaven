@@ -36,7 +36,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                             scheduler: MainScheduler(),
                                             autoPaste: prefs.autoPaste, restoreDelay: prefs.restoreDelay)
             self.secretPaster = secretPaster
-            let controller = MenuController(store: store, snippets: snippets, paster: paster, secretPaster: secretPaster)
+            let support = try Self.supportDirectory()
+            let scripts = support.appendingPathComponent("script", isDirectory: true)
+            let bundledScripts = Bundle.main.resourceURL?.appendingPathComponent("script") ?? scripts
+            let actionFolders = [scripts.appendingPathComponent("action"), bundledScripts.appendingPathComponent("action")]
+            let runner = ScriptRunner(
+                libFolders: [scripts.appendingPathComponent("lib"), bundledScripts.appendingPathComponent("lib")],
+                prompt: { question in DispatchQueue.main.sync { MainActor.assumeIsolated { ScriptPrompt.ask(question) } } },
+                activate: { DispatchQueue.main.sync { MainActor.assumeIsolated { NSApp.activate() } } })
+            let actionStore = ActionStore(url: support.appendingPathComponent("actions.json"))
+            Self.importClipMenuActionsOnce(into: actionStore, backups: support.appendingPathComponent("backups", isDirectory: true))
+            let actions = ActionService(paster: paster, store: store, runner: runner, actionFolders: actionFolders)
+            let controller = MenuController(store: store, snippets: snippets, paster: paster, secretPaster: secretPaster,
+                                            actions: actions, actionStore: actionStore, scriptsFolder: scripts, actionFolders: actionFolders)
             menuController = controller
             controller.layout = prefs.layout
             controller.showPreferences = { [weak self] in self?.showPreferences() }
@@ -111,12 +123,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerHotKey()
     }
 
-    /// `~/Library/Application Support/ClipHaven/history.sqlite`
-    private static func historyURL() throws -> URL {
+    /// `~/Library/Application Support/ClipHaven`
+    private static func supportDirectory() throws -> URL {
         let dir = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent("ClipHaven", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("history.sqlite")
+        return dir
+    }
+
+    /// `~/Library/Application Support/ClipHaven/history.sqlite`
+    private static func historyURL() throws -> URL {
+        try supportDirectory().appendingPathComponent("history.sqlite")
+    }
+
+    /// On the first run with no saved list, takes over ClipMenu's `actions.plist` if there is one.
+    /// Later runs leave the saved list alone; "Import ClipMenu Actions…" replaces it on request.
+    private static func importClipMenuActionsOnce(into store: ActionStore, backups: URL) {
+        guard (try? store.load()) == nil else { return }
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let source = support.appendingPathComponent("ClipMenu/actions.plist")
+        guard FileManager.default.fileExists(atPath: source.path) else { return }
+        do {
+            try store.save(try ActionList.importFile(at: source, backupDirectory: backups).tree)
+        } catch {
+            NSLog("ClipHaven: ClipMenu actions not imported: \(error)")
+        }
     }
 
     /// Checks the pasteboard twice a second; the tolerance lets macOS coalesce wake-ups.

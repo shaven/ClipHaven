@@ -15,5 +15,16 @@ cp -R Resources/script "$app/Contents/Resources/script"
 cp -R Resources/StatusIcons "$app/Contents/Resources/StatusIcons"
 cp "$(swift build -c release --arch arm64 --show-bin-path)/ClipHaven" "$app/Contents/MacOS/ClipHaven"
 identity="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)}"
-codesign --force --sign "${identity:--}" "$app"
+# The Keychain features that need an entitlement (iCloud-synchronizable items, Keychain-enforced
+# Touch ID) work only with a provisioning profile for com.shavenconsulting.ClipHaven. Point
+# PROVISION_PROFILE at it (default ~/.cliphaven/ClipHaven.provisionprofile); without one the app is
+# signed with no entitlements, because a restricted entitlement with no profile will not launch.
+profile="${PROVISION_PROFILE:-$HOME/.cliphaven/ClipHaven.provisionprofile}"
+if [ -f "$profile" ] && [ -n "$identity" ]; then
+    cp "$profile" "$app/Contents/embedded.provisionprofile"
+    codesign --force --sign "$identity" --entitlements Resources/ClipHaven.entitlements --options runtime "$app"
+    echo "entitlements: embedded $profile"
+else
+    codesign --force --sign "${identity:--}" "$app"
+fi
 echo "built $app (signed: ${identity:-ad-hoc})"

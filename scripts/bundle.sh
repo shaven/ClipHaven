@@ -10,6 +10,8 @@ app=build/ClipHaven.app
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS"
 cp Resources/Info.plist "$app/Contents/Info.plist"
+mkdir -p "$app/Contents/Resources"
+cp -R Resources/script "$app/Contents/Resources/script"
 cp "$(swift build -c release --arch arm64 --show-bin-path)/ClipHaven" "$app/Contents/MacOS/ClipHaven"
 identity="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)}"
 codesign --force --sign "${identity:--}" "$app"

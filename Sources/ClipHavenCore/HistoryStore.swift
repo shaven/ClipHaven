@@ -21,6 +21,20 @@ public struct StoredClip: Equatable, Sendable {
     public let representations: [Representation]
 }
 
+/// A clip without its bytes: what the menu needs, cheap to read for the whole history.
+public struct ClipSummary: Equatable, Sendable {
+    public let id: Int64
+    public let title: String
+    /// The first type stored for the clip, e.g. `public.utf8-plain-text`.
+    public let primaryType: String
+
+    public init(id: Int64, title: String, primaryType: String) {
+        self.id = id
+        self.title = title
+        self.primaryType = primaryType
+    }
+}
+
 public struct SQLiteError: Error, CustomStringConvertible {
     public let code: Int32
     public let message: String
@@ -127,6 +141,17 @@ public final class HistoryStore {
         try run("DELETE FROM clips WHERE id = ?", [.int(id)])
     }
 
+    /// Moves a clip to the top of history, as ClipMenu does after pasting it.
+    public func moveToTop(id: Int64) throws {
+        try transaction {
+            try run("UPDATE clips SET seq = ? WHERE id = ?", [.int(try nextSeq()), .int(id)])
+        }
+    }
+
+    public func clear() throws {
+        try run("DELETE FROM clips", [])
+    }
+
     // MARK: - Reading
 
     /// Clips newest first.
@@ -136,10 +161,32 @@ public final class HistoryStore {
             (sqlite3_column_int64(stmt, 0), Self.text(stmt, 1), sqlite3_column_double(stmt, 2))
         }
         return try rows.map { id, title, created in
-            let reps = try query("SELECT type, data FROM representations WHERE clip_id = ? ORDER BY rowid", [.int(id)]) {
-                Representation(type: Self.text($0, 0), data: Self.blob($0, 1))
-            }
-            return StoredClip(id: id, title: title, created: Date(timeIntervalSince1970: created), representations: reps)
+            StoredClip(id: id, title: title, created: Date(timeIntervalSince1970: created), representations: try representations(of: id))
+        }
+    }
+
+    /// Clips newest first, without their representations.
+    public func summaries(limit: Int) throws -> [ClipSummary] {
+        try query("""
+            SELECT c.id, c.title,
+                   (SELECT type FROM representations r WHERE r.clip_id = c.id ORDER BY rowid LIMIT 1)
+            FROM clips c ORDER BY c.seq DESC LIMIT ?
+            """, [.int(Int64(limit))]) { stmt in
+            ClipSummary(id: sqlite3_column_int64(stmt, 0), title: Self.text(stmt, 1), primaryType: Self.text(stmt, 2))
+        }
+    }
+
+    public func clip(id: Int64) throws -> StoredClip? {
+        let rows = try query("SELECT title, created FROM clips WHERE id = ?", [.int(id)]) { stmt in
+            (Self.text(stmt, 0), sqlite3_column_double(stmt, 1))
+        }
+        guard let (title, created) = rows.first else { return nil }
+        return StoredClip(id: id, title: title, created: Date(timeIntervalSince1970: created), representations: try representations(of: id))
+    }
+
+    private func representations(of id: Int64) throws -> [Representation] {
+        try query("SELECT type, data FROM representations WHERE clip_id = ? ORDER BY rowid", [.int(id)]) {
+            Representation(type: Self.text($0, 0), data: Self.blob($0, 1))
         }
     }
 

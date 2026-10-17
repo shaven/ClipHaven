@@ -227,9 +227,10 @@ final class MenuController: NSObject, NSMenuDelegate {
     /// Replaces the action list with ClipMenu's `actions.plist`, after backing it up.
     @objc private func importClipMenuActions() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let source = support.appendingPathComponent("ClipMenu/actions.plist")
         let backups = support.appendingPathComponent("ClipHaven/backups", isDirectory: true)
         NSApp.activate()
+        guard let source = chooseFile("Choose the ClipMenu actions file to import",
+                                      startingAt: support.appendingPathComponent("ClipMenu/actions.plist")) else { return }
         do {
             let result = try ActionList.importFile(at: source, backupDirectory: backups)
             try actionStore.save(result.tree)
@@ -249,12 +250,9 @@ final class MenuController: NSObject, NSMenuDelegate {
     /// Adds ClipMenu's old clipboard history below the current clips. It runs in a child process.
     @objc private func importClipMenuHistory() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let source = support.appendingPathComponent("ClipMenu/clips.data")
         NSApp.activate()
-        guard FileManager.default.fileExists(atPath: source.path) else {
-            show("No ClipMenu history found", "Looked for \(source.path).")
-            return
-        }
+        guard let source = chooseFile("Choose the ClipMenu history file (clips.data) to import",
+                                      startingAt: support.appendingPathComponent("ClipMenu/clips.data")) else { return }
         let ask = NSAlert()
         ask.messageText = "Import ClipMenu's clipboard history?"
         ask.informativeText = "ClipMenu's clips are added below the ones ClipHaven already has, in ClipMenu's order. Clips already here are skipped, and nothing is replaced. Images over the size limit are stored as PNG when that fits. The file is large, so this can take a minute."
@@ -322,10 +320,11 @@ final class MenuController: NSObject, NSMenuDelegate {
     /// The alert shows counts only, never snippet text.
     @objc private func importClipMenuSnippets() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let source = support.appendingPathComponent("ClipMenu/Snippets.xml")
         let backups = support.appendingPathComponent("ClipHaven/backups", isDirectory: true)
-        let alert = NSAlert()
         NSApp.activate()
+        guard let source = chooseFile("Choose the ClipMenu snippets file to import",
+                                      startingAt: support.appendingPathComponent("ClipMenu/Snippets.xml")) else { return }
+        let alert = NSAlert()
 
         if ((try? snippets.folderCount()) ?? 0) > 0 {
             alert.messageText = "Import ClipMenu snippets?"
@@ -374,6 +373,19 @@ final class MenuController: NSObject, NSMenuDelegate {
         } catch {
             show("Import failed", "\(error)")
         }
+    }
+
+    /// A file browser that opens in the folder where ClipMenu keeps the file, with that file
+    /// selected when it is there, so a backup kept anywhere else can be picked instead.
+    private func chooseFile(_ message: String, startingAt file: URL) -> URL? {
+        let panel = NSOpenPanel()
+        panel.message = message
+        panel.prompt = "Import"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = FileManager.default.fileExists(atPath: file.path) ? file : file.deletingLastPathComponent()
+        return panel.runModal() == .OK ? panel.url : nil
     }
 
     private func show(_ message: String, _ detail: String) {

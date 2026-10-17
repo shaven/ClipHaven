@@ -12,6 +12,8 @@ final class MenuController: NSObject, NSMenuDelegate {
     private let secretPaster: SecretPaster
     private lazy var editor = SnippetEditor(store: snippets, secrets: secretPaster) {}
     var layout = MenuLayout()
+    /// Opens the Preferences window; set by the app delegate.
+    var showPreferences: () -> Void = {}
     /// Shown in the status menu, e.g. "Hotkey: ⌃⌘V".
     var hotKeyNote: String?
 
@@ -67,6 +69,7 @@ final class MenuController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(actionItem("Clear History…", #selector(clearHistory)))
         menu.addItem(actionItem("Edit Snippets…", #selector(editSnippets)))
+        menu.addItem(actionItem("Preferences…", #selector(openPreferences)))
         menu.addItem(actionItem("Import ClipMenu Snippets…", #selector(importClipMenuSnippets)))
         menu.addItem(actionItem("Export…", #selector(exportAll)))
         menu.addItem(actionItem("Import…", #selector(importAll)))
@@ -161,6 +164,10 @@ final class MenuController: NSObject, NSMenuDelegate {
         NSApp.activate()
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         report { try store.clear() }
+    }
+
+    @objc private func openPreferences() {
+        showPreferences()
     }
 
     @objc private func editSnippets() {

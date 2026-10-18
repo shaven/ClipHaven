@@ -4,7 +4,26 @@ A native (arm64, Swift) menu bar clipboard manager that replaces ClipMenu. It ke
 history, the snippet folders and the hotkey menu, and adds Keychain-backed password snippets
 that need Touch ID on every paste.
 
-Requires macOS 14 or later.
+Requires macOS 14 or later, on Apple Silicon.
+
+## What is different from ClipMenu
+
+ClipMenu stopped being built for current Macs. ClipHaven keeps its history, snippets, hotkey menu
+and JavaScript actions, and changes these things:
+
+- **Native Swift, arm64.** Runs without Rosetta.
+- **Password snippets in the Keychain**, guarded by Touch ID on every paste (see below).
+- **Subfolders** in snippet folders, one level deep.
+- **Snippet sync** between your Macs through iCloud Keychain, and an **encrypted transfer file** for a Mac
+  where iCloud Keychain is blocked (a work Mac, say).
+- **Open-format export** of history and snippets as one JSON file.
+- **Imports** of ClipMenu's snippets, actions and clip history, so you can switch without retyping.
+- **Right-click gestures** (a menu at the pointer in any text field) and a choice of status-bar
+  icons, including a coloured one.
+- **Per-kind icons and image thumbnails** in the history menu.
+
+ClipHaven is a personal project, built with Claude Code. It is not notarized, and parts of it have
+been run only on the author's Macs: see *Status* at the end.
 
 ## Build and install
 
@@ -74,6 +93,17 @@ Every paste of a locked snippet asks for Touch ID (or the Mac password) again. T
 pasted marked Concealed and Transient, so it never enters history, and the clipboard you had
 comes back after the restore delay (2 seconds by default).
 
+What this protects, and what it does not:
+
+- The password lives in the macOS Keychain, not in ClipHaven's database. ClipHaven keeps only the
+  service and account names, so `history.sqlite`, exports and backups never contain it.
+- Autofill and clipboard managers that honour the Concealed marker skip the pasted value. One that
+  ignores the marker could still see it during the restore delay.
+- Touch ID is asked for by ClipHaven on each paste. Anyone who can unlock your Keychain by other
+  means is outside what this guards against.
+- **Export…** never writes a password. **Export Everything for Another Mac…** does, but only inside
+  a file sealed with your passphrase (AES-GCM, key derived with PBKDF2-SHA256). Delete it after use.
+
 ## Export and import
 
 **Export…** and **Import…** write and read one JSON file holding history and snippets. A Keychain
@@ -101,6 +131,20 @@ data folder above.
 
 ## Credits
 
-ClipHaven is based on [ClipMenu](https://github.com/naotaka/ClipMenu) by Naotaka Morimoto (MIT licence;
-the licence text is in `Resources/script/LICENSE-ClipMenu.txt`). The app icon is ClipMenu's clipboard
-with a red "CH" added, and the JavaScript actions are ClipMenu's.
+ClipHaven is based on [ClipMenu](https://github.com/naotaka/ClipMenu) by Naotaka Morimoto (MIT
+licence; the text is in `Resources/script/LICENSE-ClipMenu.txt`). The Swift code is new, but it
+follows ClipMenu's behaviour, defaults and file formats. The app icon is ClipMenu's clipboard with a
+red "CH" added, the status-bar icons are from ClipMenu (by Dave Ulrich and Suphi Aksoy), and the
+JavaScript actions and libraries are ClipMenu's. Details and the licences of the bundled libraries
+are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+## Status
+
+The test suite (`swift test`) passes. Not yet checked on real hardware: Snippet sync between two
+Macs, the transfer file on a second Mac, and some editor and menu layouts. Treat it as beta.
+Unnotarized builds downloaded from the internet may need
+`xattr -dr com.apple.quarantine ClipHaven.app`.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE).

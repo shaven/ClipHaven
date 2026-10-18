@@ -32,7 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.paster = paster
             let snippets = try SnippetStore(url: store.url)
             let authenticator = TouchIDAuthenticator()
-            let secretPaster = SecretPaster(snippets: snippets, secrets: KeychainProvider(authenticator: authenticator),
+            let keychain = KeychainProvider(authenticator: authenticator)
+            let secretPaster = SecretPaster(snippets: snippets, secrets: keychain,
                                             authenticator: authenticator, pasteboard: pasteboard, poster: KeyPoster(),
                                             scheduler: MainScheduler(),
                                             autoPaste: prefs.autoPaste, restoreDelay: prefs.restoreDelay)
@@ -50,7 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let actions = ActionService(paster: paster, store: store, runner: runner, actionFolders: actionFolders)
             let controller = MenuController(store: store, snippets: snippets, paster: paster, secretPaster: secretPaster,
                                             actions: actions, actionStore: actionStore, scriptsFolder: scripts, actionFolders: actionFolders,
-                                            syncStore: SyncSnapshotStore())
+                                            syncStore: SyncSnapshotStore(), secrets: keychain)
             menuController = controller
             controller.layout = prefs.layout
             controller.appearance = prefs.appearance

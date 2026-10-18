@@ -25,6 +25,7 @@ final class MenuController: NSObject, NSMenuDelegate {
         defaults: { [unowned self] in ActionList.defaultTree(scripts: ActionList.discoverScripts(in: actionFolders)) })
     var layout = MenuLayout()
     private let icons = MenuIcons()
+    private let secrets: SecretProvider
     private let clicks = ActionClickTracker()
     private weak var statusMenu: NSMenu?
     /// Set when the menu was opened with Control-right-click: choosing a clip opens its actions.
@@ -40,8 +41,9 @@ final class MenuController: NSObject, NSMenuDelegate {
 
     init(store: HistoryStore, snippets: SnippetStore, paster: Paster, secretPaster: SecretPaster,
          actions: ActionService, actionStore: ActionStore, scriptsFolder: URL, actionFolders: [URL],
-         syncStore: SnapshotStore) {
+         syncStore: SnapshotStore, secrets: SecretProvider) {
         self.syncStore = syncStore
+        self.secrets = secrets
         self.actions = actions
         self.actionStore = actionStore
         self.scriptsFolder = scriptsFolder
@@ -135,6 +137,8 @@ final class MenuController: NSObject, NSMenuDelegate {
         submenu.addItem(.separator())
         submenu.addItem(actionItem("Export…", #selector(exportAll)))
         submenu.addItem(actionItem("Import…", #selector(importAll)))
+        submenu.addItem(actionItem("Export Everything for Another Mac…", #selector(exportTransfer)))
+        submenu.addItem(actionItem("Import from Another Mac…", #selector(importTransfer)))
         submenu.addItem(.separator())
         submenu.addItem(actionItem("Open Scripts Folder", #selector(openScriptsFolder)))
         submenu.addItem(actionItem("Help: Writing Scripts", #selector(openScriptsHelp)))
@@ -428,6 +432,69 @@ final class MenuController: NSObject, NSMenuDelegate {
         do {
             let counts = try Export.restore(Data(contentsOf: url), history: store, snippets: snippets)
             show("Imported \(counts.clips) clips, \(counts.folders) folders and \(counts.snippets) snippets", "Nothing was replaced.")
+        } catch {
+            show("Import failed", "\(error)")
+        }
+    }
+
+    /// Asks for the transfer passphrase; `confirm` asks twice, as when the file is made.
+    private func askPassphrase(_ message: String, confirm: Bool) -> String? {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = confirm
+            ? "Type the same passphrase on the other Mac to open the file. It is not stored anywhere; if you forget it the file cannot be opened."
+            : "The passphrase you chose when the file was made."
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Cancel")
+        let first = NSSecureTextField(frame: NSRect(x: 0, y: 30, width: 260, height: 24))
+        first.placeholderString = "Passphrase"
+        let second = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        second.placeholderString = "Again"
+        let box = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: confirm ? 58 : 24))
+        first.frame.origin.y = confirm ? 34 : 0
+        box.addSubview(first)
+        if confirm { box.addSubview(second) }
+        alert.accessoryView = box
+        NSApp.activate()
+        alert.window.initialFirstResponder = first
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        guard !first.stringValue.isEmpty else { show("No passphrase", "Type a passphrase to seal the file."); return nil }
+        if confirm, first.stringValue != second.stringValue {
+            show("The passphrases differ", "Nothing was exported.")
+            return nil
+        }
+        return first.stringValue
+    }
+
+    /// History, snippets, passwords, the action list and settings in one file sealed with a passphrase.
+    @objc private func exportTransfer() {
+        guard let passphrase = askPassphrase("Passphrase for the transfer file", confirm: true) else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "ClipHaven Transfer.cliphaven"
+        panel.message = "Passwords are read from the Keychain, so you may be asked for Touch ID."
+        NSApp.activate()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let data = try Transfer.seal(history: store, snippets: snippets, secrets: secrets, actions: actionStore,
+                                         preferences: Preferences(), passphrase: passphrase)
+            try data.write(to: url, options: .atomic)
+            show("Transfer file saved", "Copy it to the other Mac and choose Import from Another Mac…. Delete it afterwards.")
+        } catch {
+            show("Export failed", "\(error)")
+        }
+    }
+
+    @objc private func importTransfer() {
+        let panel = NSOpenPanel()
+        panel.message = "Choose a ClipHaven transfer file."
+        NSApp.activate()
+        guard panel.runModal() == .OK, let url = panel.url,
+              let passphrase = askPassphrase("Passphrase for the transfer file", confirm: false) else { return }
+        do {
+            let counts = try Transfer.open(Data(contentsOf: url), passphrase: passphrase, history: store, snippets: snippets,
+                                           secrets: secrets, actions: actionStore, preferences: Preferences())
+            show("Imported \(counts.clips) clips, \(counts.folders) folders, \(counts.snippets) snippets and \(counts.secrets) passwords",
+                 "Your action list and settings were replaced. Restart ClipHaven for the history size to apply.")
         } catch {
             show("Import failed", "\(error)")
         }

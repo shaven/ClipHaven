@@ -156,12 +156,27 @@ public struct Preferences {
         HistoryStore.Limits(maxCount: maxCount, maxImageBytes: maxImageBytes)
     }
 
+    /// Every key ClipHaven saves, for reset and for moving settings to another Mac.
+    static let keys = ["autoPaste", "hotKeyCode", "hotKeyModifiers", "maxCount", "maxImageBytes", "inlineCount",
+                       "folderSize", "titleLength", "numbered", "restoreDelay", "showIcons", "iconSize",
+                       "showThumbnails", "thumbnailWidth", "thumbnailHeight", "statusIcon", "rightClickMenu",
+                       "rightClickPasteKeys", "rightClickActionKeys"]
+
     public mutating func reset() {
-        for key in ["autoPaste", "hotKeyCode", "hotKeyModifiers", "maxCount", "maxImageBytes", "inlineCount",
-                    "folderSize", "titleLength", "numbered", "restoreDelay", "showIcons", "iconSize",
-                    "showThumbnails", "thumbnailWidth", "thumbnailHeight", "statusIcon", "rightClickMenu",
-                    "rightClickPasteKeys", "rightClickActionKeys"] {
-            defaults.removeObject(forKey: key)
+        for key in Self.keys { defaults.removeObject(forKey: key) }
+    }
+
+    /// The settings that have been changed from their defaults, as a property list.
+    public func exported() throws -> Data {
+        let values = Self.keys.reduce(into: [String: Any]()) { $0[$1] = defaults.object(forKey: $1) }
+        return try PropertyListSerialization.data(fromPropertyList: values, format: .binary, options: 0)
+    }
+
+    /// Sets every known key found in a list made by `exported()`; unknown keys are ignored.
+    public func apply(exported data: Data) throws {
+        guard let values = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else { return }
+        for key in Self.keys {
+            if let value = values[key] { defaults.set(value, forKey: key) }
         }
     }
 

@@ -71,6 +71,14 @@ comes back after the restore delay (2 seconds by default).
 snippet is exported as its service and account only; the password is never read or written.
 Importing adds to what is there and replaces nothing.
 
+## Moving to another Mac
+
+**Export Everything for Another Mac…** writes one file with history, snippets, the action list,
+settings and the password values behind Keychain snippets. It is sealed with a passphrase you type
+twice; type it again on the other Mac under **Import from Another Mac…**. Clips and snippets are
+added, passwords the other Mac already has are kept, and the action list and settings are replaced.
+Delete the file after use.
+
 ## Data
 
 Everything is in `~/Library/Application Support/ClipHaven/`: `history.sqlite` (history and

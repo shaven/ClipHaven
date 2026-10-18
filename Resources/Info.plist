@@ -5,7 +5,9 @@
 	<key>CFBundleExecutable</key>
 	<string>ClipHaven</string>
 	<key>CFBundleIconFile</key>
-	<string>ClipHaven</string>
+	<string>AppIcon</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.shavenconsulting.ClipHaven</string>
 	<key>CFBundleName</key>

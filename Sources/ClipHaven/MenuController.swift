@@ -129,6 +129,7 @@ final class MenuController: NSObject, NSMenuDelegate {
         submenu.addItem(actionItem("Import…", #selector(importAll)))
         submenu.addItem(.separator())
         submenu.addItem(actionItem("Open Scripts Folder", #selector(openScriptsFolder)))
+        submenu.addItem(actionItem("Help: Writing Scripts", #selector(openScriptsHelp)))
         tools.submenu = submenu
         menu.addItem(tools)
 
@@ -216,8 +217,12 @@ final class MenuController: NSObject, NSMenuDelegate {
 
     /// The saved action list, or the default one (built-ins plus every script found).
     private func actionTree() -> [ActionNode] {
-        if let saved = try? actionStore.load() { return saved }
-        return ActionList.defaultTree(scripts: ActionList.discoverScripts(in: actionFolders))
+        guard let saved = try? actionStore.load() else {
+            return ActionList.defaultTree(scripts: ActionList.discoverScripts(in: actionFolders))
+        }
+        // Scripts in the user folder that the saved list lacks appear under "My Scripts".
+        let mine = ActionList.discoverScripts(in: [scriptsFolder.appendingPathComponent("action")])
+        return ActionList.withMyScripts(saved, userScripts: mine)
     }
 
     private func popUpActions(for id: Int64) {
@@ -330,6 +335,12 @@ final class MenuController: NSObject, NSMenuDelegate {
             try? FileManager.default.createDirectory(at: scriptsFolder.appendingPathComponent(sub), withIntermediateDirectories: true)
         }
         NSWorkspace.shared.open(scriptsFolder)
+    }
+
+    /// The bundled guide to writing and adding scripts, opened in the default text editor.
+    @objc private func openScriptsHelp() {
+        guard let help = Bundle.main.resourceURL?.appendingPathComponent("Help/Writing-Scripts.txt") else { return }
+        NSWorkspace.shared.open(help)
     }
 
     @objc private func clearHistory() {

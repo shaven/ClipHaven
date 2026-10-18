@@ -13,6 +13,7 @@ cp Resources/Info.plist "$app/Contents/Info.plist"
 mkdir -p "$app/Contents/Resources"
 cp -R Resources/script "$app/Contents/Resources/script"
 cp -R Resources/StatusIcons "$app/Contents/Resources/StatusIcons"
+cp -R Resources/Help "$app/Contents/Resources/Help"
 cp "$(swift build -c release --arch arm64 --show-bin-path)/ClipHaven" "$app/Contents/MacOS/ClipHaven"
 # The app icon is drawn by the app itself (one source for the menu bar and the Finder icon).
 iconset="$(mktemp -d)/ClipHaven.iconset"

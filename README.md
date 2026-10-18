@@ -39,7 +39,18 @@ ad-hoc signature changes with each build.
 4. Open **Preferences…** and press **Default** for the hotkey to take Cmd+Ctrl+V.
 5. Tick **Start ClipHaven at login**.
 
-ClipMenu's clip history (`clips.data`) and its JavaScript actions are not imported.
+Import ClipMenu's actions and clip history the same way, from the same submenu.
+
+## Scripts
+
+Control-click a clip (or use the action gesture in Preferences) for the action menu. Scripts are
+`.js` files: the file is a function body that reads `clipText` and `return`s the new text, e.g.
+`return clipText.split('').reverse().join('');`.
+
+To add one, choose **Import, Export and Scripts > Open Scripts Folder**, drop a `.js` file in
+`action/` and open the action menu: new scripts appear under **My Scripts**. Helpers (`prompt()`,
+`ClipMenu.require`, `ClipMenu.activate`) and limits are in **Help: Writing Scripts** in the same
+submenu (`Resources/Help/Writing-Scripts.txt`).
 
 ## Password snippets
 

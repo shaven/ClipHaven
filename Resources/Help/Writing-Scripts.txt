@@ -1,0 +1,39 @@
+WRITING AND ADDING SCRIPTS IN CLIPHAVEN
+
+A script changes the text of a clip. You pick it from the action menu (Control-click a clip,
+or the action gesture set in Preferences) and ClipHaven pastes what the script returns.
+
+ADD A SCRIPT
+1. Status menu > Import, Export and Scripts > Open Scripts Folder.
+2. Put a file ending in .js inside the "action" folder. Subfolders become submenus.
+3. Open the action menu again. New scripts appear under "My Scripts". No restart needed.
+   (A script your saved action list already includes stays where that list puts it.)
+The folder is ~/Library/Application Support/ClipHaven/script/
+
+WRITE A SCRIPT
+The file is the body of a function. Two rules:
+  - Read the clip as the variable  clipText  (a string).
+  - Finish with  return  and the new text.
+
+Example, Reverse.js:
+    return clipText.split('').reverse().join('');
+
+Example, Trim and join lines, TrimLines.js:
+    return clipText.split('\n').map(function (l) { return l.trim(); }).join(' ');
+
+A script with no return, or one that returns nothing, pastes nothing.
+
+HELPERS
+  prompt("Question?")        asks you for a line of text and returns it (null if you cancel).
+                             Time spent waiting for you does not count toward the time limit.
+  ClipMenu.activate()        brings ClipHaven to the front, for use before prompt().
+  ClipMenu.require("name")   loads name.js from the "lib" folder next to "action", so scripts
+                             can share code. Names that climb out of "lib" are refused.
+  exports                    in a library file, set  exports.fn = ...  to share functions.
+
+LIMITS
+A script that runs longer than 5 seconds is given up on and reports an error. The error appears
+in a dialog; nothing is pasted. Scripts run only on text clips.
+
+SHARE ONE
+Copy the .js file. ClipMenu's scripts work unchanged; ClipHaven ships ClipMenu's own set.

@@ -195,3 +195,30 @@ final class ActionListTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(pastedText()).contains("/"))
     }
 }
+
+@MainActor
+final class MyScriptsTests: XCTestCase {
+    private func script(_ path: String) -> ActionNode {
+        ActionNode(title: String((path as NSString).lastPathComponent.dropLast(3)), kind: .script(path))
+    }
+
+    func testScriptsNotInTheSavedListGoUnderMyScripts() {
+        let saved = [ActionNode(title: "Upper", kind: .script("Case/UPPERCASE.js"))]
+        let user = [script("Case/UPPERCASE.js"), script("Shout.js")]
+        let result = ActionList.withMyScripts(saved, userScripts: user)
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result[1].title, "My Scripts")
+        XCTAssertEqual(result[1].kind, .folder([script("Shout.js")]))
+    }
+
+    func testNoMyScriptsFolderWhenEverythingIsListed() {
+        let saved = [ActionNode(title: "Folder", kind: .folder([script("A.js")]))]
+        XCTAssertEqual(ActionList.withMyScripts(saved, userScripts: [script("A.js")]), saved)
+    }
+
+    func testMyScriptsKeepsSubfolders() {
+        let user = [ActionNode(title: "Text", kind: .folder([script("Text/Reverse.js")]))]
+        let result = ActionList.withMyScripts([], userScripts: user)
+        XCTAssertEqual(result, [ActionNode(title: "My Scripts", kind: .folder(user))])
+    }
+}

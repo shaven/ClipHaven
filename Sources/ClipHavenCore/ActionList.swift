@@ -105,6 +105,35 @@ public enum ActionList {
         return tree
     }
 
+    /// The tree plus a "My Scripts" folder holding every script of `userScripts` that the tree does
+    /// not already list, so a script dropped into the user folder shows up without editing the list.
+    public static func withMyScripts(_ tree: [ActionNode], userScripts: [ActionNode]) -> [ActionNode] {
+        var listed = Set<String>()
+        func collect(_ nodes: [ActionNode]) {
+            for node in nodes {
+                switch node.kind {
+                case .script(let path): listed.insert(path)
+                case .folder(let children): collect(children)
+                case .builtin: break
+                }
+            }
+        }
+        collect(tree)
+        func unlisted(_ nodes: [ActionNode]) -> [ActionNode] {
+            nodes.compactMap { node in
+                switch node.kind {
+                case .script(let path): return listed.contains(path) ? nil : node
+                case .folder(let children):
+                    let kept = unlisted(children)
+                    return kept.isEmpty ? nil : ActionNode(title: node.title, kind: .folder(kept))
+                case .builtin: return nil
+                }
+            }
+        }
+        let extra = unlisted(userScripts)
+        return extra.isEmpty ? tree : tree + [ActionNode(title: "My Scripts", kind: .folder(extra))]
+    }
+
     /// The part of the tree that applies to a clip: text actions need text, file-path actions
     /// need files, and a folder with nothing left in it is hidden.
     public static func visible(_ tree: [ActionNode], for representations: [Representation]) -> [ActionNode] {

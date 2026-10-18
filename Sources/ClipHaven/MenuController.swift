@@ -16,6 +16,13 @@ final class MenuController: NSObject, NSMenuDelegate {
     private let scriptsFolder: URL
     private let actionFolders: [URL]
     private lazy var editor = SnippetEditor(store: snippets, secrets: secretPaster) {}
+    private lazy var actionEditor = ActionEditor(
+        load: { [unowned self] in actionTree() },
+        save: { [unowned self] tree in
+            do { try actionStore.save(tree) } catch { NSLog("ClipHaven: action list not saved: \(error)") }
+        },
+        scripts: { [unowned self] in ActionList.discoverScripts(in: actionFolders) },
+        defaults: { [unowned self] in ActionList.defaultTree(scripts: ActionList.discoverScripts(in: actionFolders)) })
     var layout = MenuLayout()
     private let icons = MenuIcons()
     private let clicks = ActionClickTracker()
@@ -114,6 +121,7 @@ final class MenuController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
         menu.addItem(actionItem("Edit Snippets…", #selector(editSnippets)))
+        menu.addItem(actionItem("Edit Actions…", #selector(editActions)))
         menu.addItem(actionItem("Clear History…", #selector(clearHistory)))
         menu.addItem(actionItem("Preferences…", #selector(openPreferences)))
 
@@ -356,6 +364,10 @@ final class MenuController: NSObject, NSMenuDelegate {
 
     @objc private func openPreferences() {
         showPreferences()
+    }
+
+    @objc private func editActions() {
+        actionEditor.show()
     }
 
     @objc private func editSnippets() {

@@ -23,7 +23,11 @@ enum ColourIcon {
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
         let side = CGFloat(pixels)
-        draw(in: NSRect(x: 0, y: 0, width: side, height: side), margin: forApp ? side * 0.1 : 0)
+        if forApp {
+            drawApp(in: NSRect(x: 0, y: 0, width: side, height: side).insetBy(dx: side * 0.1, dy: side * 0.1))
+        } else {
+            draw(in: NSRect(x: 0, y: 0, width: side, height: side), margin: 0)
+        }
         NSGraphicsContext.restoreGraphicsState()
         return rep.representation(using: .png, properties: [:])
     }
@@ -31,6 +35,42 @@ enum ColourIcon {
     private static func color(_ hex: UInt32) -> NSColor {
         NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
                 blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+    }
+
+    /// The app icon: macOS's usual light rounded tile with a slate clipboard and a bold "CH".
+    private static func drawApp(in art: NSRect) {
+        let w = art.width
+        func r(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) -> NSRect {
+            NSRect(x: art.minX + x * w, y: art.minY + y * w, width: width * w, height: height * w)
+        }
+        let tile = NSBezierPath(roundedRect: art, xRadius: w * 0.2237, yRadius: w * 0.2237)
+        NSGradient(starting: color(0xFFFFFF), ending: color(0xDCE1E8))?.draw(in: tile, angle: -90)
+        color(0xC3CAD4).setStroke()
+        tile.lineWidth = w * 0.006
+        tile.stroke()
+
+        // Clipboard board and sheet.
+        let board = NSBezierPath(roundedRect: r(0.22, 0.12, 0.56, 0.68), xRadius: w * 0.06, yRadius: w * 0.06)
+        NSGradient(starting: color(0x5A6678), ending: color(0x39424F))?.draw(in: board, angle: -90)
+        color(0xFFFFFF).setFill()
+        NSBezierPath(roundedRect: r(0.27, 0.17, 0.46, 0.55), xRadius: w * 0.035, yRadius: w * 0.035).fill()
+
+        // Clip.
+        let clip = NSBezierPath(roundedRect: r(0.37, 0.72, 0.26, 0.12), xRadius: w * 0.035, yRadius: w * 0.035)
+        NSGradient(starting: color(0xB8C0CC), ending: color(0x8993A3))?.draw(in: clip, angle: -90)
+        color(0x39424F).setStroke()
+        clip.lineWidth = w * 0.008
+        clip.stroke()
+        color(0x39424F).setFill()
+        NSBezierPath(ovalIn: r(0.46, 0.76, 0.08, 0.04)).fill()
+
+        // "CH", one bold line centred on the sheet.
+        let text = NSAttributedString(string: "CH", attributes: [
+            .font: NSFont.systemFont(ofSize: w * 0.25, weight: .heavy),
+            .foregroundColor: color(0x2A6FDB),
+            .kern: w * 0.004])
+        let size = text.size()
+        text.draw(at: NSPoint(x: art.midX - size.width / 2, y: art.minY + w * 0.445 - size.height / 2))
     }
 
     /// Draws on an 18-point grid fitted into `rect` less `margin` on each side.

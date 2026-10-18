@@ -52,6 +52,15 @@ To add one, choose **Import, Export and Scripts > Open Scripts Folder**, drop a 
 `ClipMenu.require`, `ClipMenu.activate`) and limits are in **Help: Writing Scripts** in the same
 submenu (`Resources/Help/Writing-Scripts.txt`).
 
+## Subfolders
+
+A snippet folder can hold subfolders, one level deep (a subfolder cannot hold another). In
+**Edit Snippets…**, **+ Sub** adds a folder inside the selected one, **In** moves the selected
+folder into the top-level folder above it, and **Out** moves it back. In the menu, subfolders
+appear as submenus above the folder's own snippets. Export, the transfer file and the iCloud
+sync carry them; files from before subfolders read as top level. ClipMenu has no subfolders, so
+**Import ClipMenu Snippets…** still brings in flat folders.
+
 ## Password snippets
 
 In **Edit Snippets…**, select a snippet and choose:

@@ -72,4 +72,19 @@ final class MenuModelTests: XCTestCase {
         let entries = MenuModel.build(clips: clips(1), snippetFolders: [], layout: layout)
         XCTAssertEqual(items(entries).first?.title, "c1")
     }
+
+    func testSubfoldersBecomeSubmenusAboveTheFoldersOwnSnippets() {
+        let inner = SnippetFolderSummary(title: "Email", snippets: [SnippetSummary(id: 2, title: "Signature")])
+        let outer = SnippetFolderSummary(title: "Work", snippets: [SnippetSummary(id: 1, title: "Address")], subfolders: [inner])
+        let entries = build(0, snippets: [outer])
+        XCTAssertEqual(entries, [.folderWithSubfolders(
+            title: "Work",
+            items: [MenuItemEntry(target: .snippet(1), title: "Address")],
+            subfolders: [MenuSubfolder(title: "Email", items: [MenuItemEntry(target: .snippet(2), title: "Signature")])])])
+    }
+
+    func testAFolderWithoutSubfoldersStaysAPlainFolder() {
+        let entries = build(0, snippets: [SnippetFolderSummary(title: "Work", snippets: [SnippetSummary(id: 7, title: "Signature")])])
+        XCTAssertEqual(entries, [.folder(title: "Work", items: [MenuItemEntry(target: .snippet(7), title: "Signature")])])
+    }
 }

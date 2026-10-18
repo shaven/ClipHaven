@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 
 public struct Snippet: Equatable, Sendable {
     public let id: Int64
@@ -17,6 +18,18 @@ public struct SnippetFolder: Equatable, Sendable {
     public let title: String
     public let enabled: Bool
     public let snippets: [Snippet]
+    /// The folder this one sits in; nil for a top-level folder. Only one level is allowed.
+    public let parentID: Int64?
+}
+
+public enum SnippetError: Error, CustomStringConvertible {
+    case cannotNest(String)
+
+    public var description: String {
+        switch self {
+        case .cannotNest(let reason): "That folder cannot go there: \(reason)"
+        }
+    }
 }
 
 public struct ImportCounts: Equatable, Sendable {
@@ -60,13 +73,37 @@ public final class SnippetStore {
                                    ("requires_auth", "INTEGER NOT NULL DEFAULT 0")] where !existing.contains(name) {
             try database.exec("ALTER TABLE snippets ADD COLUMN \(name) \(definition)")
         }
+        // Phase 18: a folder may sit inside one top-level folder.
+        let folderColumns = Set(try database.query("PRAGMA table_info(snippet_folders)", []) { SQLiteDatabase.text($0, 1) })
+        if !folderColumns.contains("parent_id") {
+            try database.exec("ALTER TABLE snippet_folders ADD COLUMN parent_id INTEGER REFERENCES snippet_folders (id) ON DELETE CASCADE")
+        }
     }
 
     // MARK: - Writing
 
     @discardableResult
-    public func addFolder(title: String, enabled: Bool = true) throws -> Int64 {
-        try database.transaction { try insertFolder(title: title, enabled: enabled) }
+    public func addFolder(title: String, enabled: Bool = true, parentID: Int64? = nil) throws -> Int64 {
+        try database.transaction {
+            if let parentID { try requireTopLevel(parentID) }
+            return try insertFolder(title: title, enabled: enabled, parentID: parentID)
+        }
+    }
+
+    /// Puts a folder inside a top-level folder, or back at the top level when `parentID` is nil.
+    /// Only one level exists: the target must be top level, and a folder that holds subfolders
+    /// cannot itself become one.
+    public func moveFolder(id: Int64, under parentID: Int64?) throws {
+        try database.transaction {
+            if let parentID {
+                guard parentID != id else { throw SnippetError.cannotNest("a folder cannot go inside itself") }
+                try requireTopLevel(parentID)
+                let children = try database.scalarInt("SELECT count(*) FROM snippet_folders WHERE parent_id = \(id)")
+                guard children == 0 else { throw SnippetError.cannotNest("it already holds folders, and folders go only one level deep") }
+            }
+            try database.run("UPDATE snippet_folders SET parent_id = ? WHERE id = ?",
+                             [parentID.map { .int($0) } ?? .null, .int(id)])
+        }
     }
 
     @discardableResult
@@ -125,8 +162,11 @@ public final class SnippetStore {
     public func importFolders(_ folders: [ImportedFolder]) throws -> ImportCounts {
         try database.transaction {
             var snippetCount = 0
-            for folder in folders {
-                let id = try insertFolder(title: folder.title, enabled: folder.enabled)
+            var made: [String: Int64] = [:]
+            for folder in Self.parentsFirst(folders) {
+                let parent = folder.parent.flatMap { made[$0] }
+                let id = try insertFolder(title: folder.title, enabled: folder.enabled, parentID: parent)
+                if folder.parent == nil { made[folder.title] = id }
                 for snippet in folder.snippets {
                     let snippetID = try insertSnippet(folderID: id, title: snippet.title, content: snippet.content, enabled: snippet.enabled)
                     if let secret = snippet.secret { try setSecret(id: snippetID, secret) }
@@ -150,19 +190,25 @@ public final class SnippetStore {
                 secret.map { "\(title)\u{0}keychain\u{0}\($0.service)\u{0}\($0.account)" } ?? "\(title)\u{0}text\u{0}\(content)"
             }
             var created: [String: Int64] = [:]
-            for folder in folders {
-                let match = existing.first { $0.title == folder.title }
+            for folder in Self.parentsFirst(folders) {
+                // A subfolder is matched by its parent's title as well as its own. A parent that
+                // cannot be found leaves the folder at the top level.
+                let parent = folder.parent.flatMap { name in
+                    existing.first { $0.parentID == nil && $0.title == name }?.id ?? created["\u{0}\(name)"]
+                }
+                let path = "\(parent.map(String.init) ?? "")\u{0}\(folder.title)"
+                let match = existing.first { $0.title == folder.title && $0.parentID == parent }
                 let id: Int64
                 var known: Set<String>
                 if let match {
                     id = match.id
                     known = Set(match.snippets.map { key($0.title, $0.secret, $0.content) })
-                } else if let earlier = created[folder.title] {
+                } else if let earlier = created[path] {
                     id = earlier
                     known = []
                 } else {
-                    id = try insertFolder(title: folder.title, enabled: folder.enabled)
-                    created[folder.title] = id
+                    id = try insertFolder(title: folder.title, enabled: folder.enabled, parentID: parent)
+                    created[path] = id
                     folderCount += 1
                     known = []
                 }
@@ -181,19 +227,25 @@ public final class SnippetStore {
 
     /// Every folder with its snippets, in order, enabled or not (the editor shows all).
     public func folders() throws -> [SnippetFolder] {
-        let folders = try database.query("SELECT id, title, enabled FROM snippet_folders ORDER BY position, id", []) {
-            (SQLiteDatabase.int($0, 0), SQLiteDatabase.text($0, 1), SQLiteDatabase.int($0, 2) != 0)
+        let folders = try database.query("SELECT id, title, enabled, parent_id FROM snippet_folders ORDER BY position, id", []) {
+            (SQLiteDatabase.int($0, 0), SQLiteDatabase.text($0, 1), SQLiteDatabase.int($0, 2) != 0,
+             sqlite3_column_type($0, 3) == SQLITE_NULL ? nil : SQLiteDatabase.int($0, 3))
         }
-        return try folders.map { id, title, enabled in
-            SnippetFolder(id: id, title: title, enabled: enabled, snippets: try snippets(in: id))
+        return try folders.map { id, title, enabled, parent in
+            SnippetFolder(id: id, title: title, enabled: enabled, snippets: try snippets(in: id), parentID: parent)
         }
     }
 
     /// What the menu shows: enabled folders holding their enabled snippets, titles only.
     public func menuSummaries() throws -> [SnippetFolderSummary] {
-        try folders().filter(\.enabled).map { folder in
+        let all = try folders()
+        func summary(_ folder: SnippetFolder, subfolders: [SnippetFolderSummary] = []) -> SnippetFolderSummary {
             SnippetFolderSummary(title: folder.title,
-                                 snippets: folder.snippets.filter(\.enabled).map { SnippetSummary(id: $0.id, title: $0.title, isLocked: $0.isLocked) })
+                                 snippets: folder.snippets.filter(\.enabled).map { SnippetSummary(id: $0.id, title: $0.title, isLocked: $0.isLocked) },
+                                 subfolders: subfolders)
+        }
+        return all.filter { $0.enabled && $0.parentID == nil }.map { top in
+            summary(top, subfolders: all.filter { $0.enabled && $0.parentID == top.id }.map { summary($0) })
         }
     }
 
@@ -232,11 +284,24 @@ public final class SnippetStore {
         try database.query("\(Self.snippetColumns) FROM snippets WHERE folder_id = ? ORDER BY position, id", [.int(folderID)], row: Self.snippet(from:))
     }
 
-    private func insertFolder(title: String, enabled: Bool) throws -> Int64 {
+    private func insertFolder(title: String, enabled: Bool, parentID: Int64? = nil) throws -> Int64 {
         let position = try database.scalarInt("SELECT coalesce(max(position), -1) + 1 FROM snippet_folders")
-        try database.run("INSERT INTO snippet_folders (title, enabled, position) VALUES (?, ?, ?)",
-                         [.text(title), .int(enabled ? 1 : 0), .int(Int64(position))])
+        try database.run("INSERT INTO snippet_folders (title, enabled, position, parent_id) VALUES (?, ?, ?, ?)",
+                         [.text(title), .int(enabled ? 1 : 0), .int(Int64(position)), parentID.map { .int($0) } ?? .null])
         return database.lastInsertRowID
+    }
+
+    /// Throws unless `id` is a folder with no parent.
+    private func requireTopLevel(_ id: Int64) throws {
+        let rows = try database.query("SELECT parent_id IS NULL FROM snippet_folders WHERE id = ?", [.int(id)]) { SQLiteDatabase.int($0, 0) }
+        guard let isTop = rows.first else { throw SnippetError.cannotNest("the folder it should go in does not exist") }
+        guard isTop != 0 else { throw SnippetError.cannotNest("folders go only one level deep") }
+    }
+
+    /// Folders with no parent first, then the rest, each group in its given order, so a parent
+    /// exists before its subfolders are made.
+    private static func parentsFirst(_ folders: [ImportedFolder]) -> [ImportedFolder] {
+        folders.filter { $0.parent == nil } + folders.filter { $0.parent != nil }
     }
 
     @discardableResult

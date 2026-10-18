@@ -159,4 +159,19 @@ final class SyncTests: SecretTestCase {
         XCTAssertEqual(shared.data, Data("garbage".utf8))
         XCTAssertEqual(shared.writes, 0)
     }
+
+    func testSubfoldersTravelThroughASnapshot() throws {
+        let work = try snippets.addFolder(title: "Work")
+        let email = try snippets.addFolder(title: "Email", parentID: work)
+        try snippets.addSnippet(folderID: email, title: "sig", content: "Regards")
+        let snapshot = try SnippetSync.snapshot(of: snippets, device: "A")
+        let other = try freshStore()
+        try SnippetSync.merge(snapshot.data, into: other)
+        let folders = try other.folders()
+        let newWork = try XCTUnwrap(folders.first { $0.title == "Work" })
+        XCTAssertEqual(folders.first { $0.title == "Email" }?.parentID, newWork.id)
+        XCTAssertEqual(try other.mergeFolders([]), ImportCounts(folders: 0, snippets: 0))
+        try SnippetSync.merge(snapshot.data, into: other)
+        XCTAssertEqual(try other.folders().count, folders.count, "a second merge adds nothing")
+    }
 }

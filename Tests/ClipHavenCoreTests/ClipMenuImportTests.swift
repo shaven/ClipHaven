@@ -63,4 +63,19 @@ final class ClipMenuImportTests: XCTestCase {
         XCTAssertThrowsError(try ClipMenuImport.importFile(at: source, into: store, backupDirectory: dir.appendingPathComponent("backups")))
         XCTAssertEqual(try store.folderCount(), 0)
     }
+
+    func testClipMenuFoldersImportFlatAndLeaveExistingSubfoldersAlone() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ImportNested-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let store = try SnippetStore(url: dir.appendingPathComponent("history.sqlite"))
+        let work = try store.addFolder(title: "Work")
+        try store.addFolder(title: "Email", parentID: work)
+
+        try store.importFolders(ClipMenuImport.parse(fixture()))
+
+        let folders = try store.folders()
+        XCTAssertEqual(folders.map(\.title), ["Work", "Email", "Greetings", "Second folder"])
+        XCTAssertEqual(folders.map(\.parentID), [nil, work, nil, nil])
+    }
 }

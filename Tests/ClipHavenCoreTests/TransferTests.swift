@@ -98,4 +98,17 @@ final class TransferTests: XCTestCase {
         XCTAssertEqual(b.secrets.items[ref], "already-here")
         XCTAssertEqual(counts.secrets, 0)
     }
+
+    func testSubfoldersMoveToAnotherMachine() throws {
+        let a = try machine("a"), b = try machine("b")
+        let work = try a.snippets.addFolder(title: "Work")
+        let email = try a.snippets.addFolder(title: "Email", parentID: work)
+        try a.snippets.addSnippet(folderID: email, title: "sig", content: "Regards")
+        let file = try Transfer.seal(history: a.history, snippets: a.snippets, secrets: a.secrets, actions: a.actions,
+                                     preferences: a.prefs, passphrase: "pw")
+        _ = try Transfer.open(file, passphrase: "pw", history: b.history, snippets: b.snippets,
+                              secrets: b.secrets, actions: b.actions, preferences: b.prefs)
+        let folders = try b.snippets.folders()
+        XCTAssertEqual(folders.first { $0.title == "Email" }?.parentID, folders.first { $0.title == "Work" }?.id)
+    }
 }

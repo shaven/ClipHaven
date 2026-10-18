@@ -143,3 +143,119 @@ final class SnippetStoreTests: XCTestCase {
         XCTAssertNil(try store.snippet(id: 999))
     }
 }
+
+final class SnippetSubfolderTests: XCTestCase {
+    private var dir: URL!
+    private var url: URL!
+
+    override func setUpWithError() throws {
+        dir = FileManager.default.temporaryDirectory.appendingPathComponent("SubfolderTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        url = dir.appendingPathComponent("history.sqlite")
+    }
+
+    override func tearDownWithError() throws { try? FileManager.default.removeItem(at: dir) }
+
+    func testASubfolderRecordsItsParentAndTopLevelFoldersHaveNone() throws {
+        let store = try SnippetStore(url: url)
+        let work = try store.addFolder(title: "Work")
+        let email = try store.addFolder(title: "Email", parentID: work)
+        let folders = try store.folders()
+        XCTAssertEqual(folders.map(\.title), ["Work", "Email"])
+        XCTAssertNil(folders[0].parentID)
+        XCTAssertEqual(folders[1].parentID, work)
+        try store.addSnippet(folderID: email, title: "sig", content: "Regards")
+        XCTAssertEqual(try store.folders()[1].snippets.map(\.title), ["sig"])
+    }
+
+    func testASubfolderCannotHaveSubfolders() throws {
+        let store = try SnippetStore(url: url)
+        let work = try store.addFolder(title: "Work")
+        let email = try store.addFolder(title: "Email", parentID: work)
+        XCTAssertThrowsError(try store.addFolder(title: "Deep", parentID: email))
+        XCTAssertThrowsError(try store.addFolder(title: "Orphan", parentID: 9_999))
+        XCTAssertEqual(try store.folderCount(), 2)
+    }
+
+    func testMovingFolders() throws {
+        let store = try SnippetStore(url: url)
+        let a = try store.addFolder(title: "A")
+        let b = try store.addFolder(title: "B")
+        try store.moveFolder(id: b, under: a)
+        XCTAssertEqual(try store.folders().last?.parentID, a)
+        try store.moveFolder(id: b, under: nil)
+        XCTAssertNil(try store.folders().last?.parentID)
+
+        let c = try store.addFolder(title: "C", parentID: a)
+        XCTAssertThrowsError(try store.moveFolder(id: a, under: b), "a folder holding subfolders cannot become one")
+        XCTAssertThrowsError(try store.moveFolder(id: a, under: a))
+        XCTAssertThrowsError(try store.moveFolder(id: b, under: c), "the target must be top level")
+    }
+
+    func testDeletingAParentDeletesItsSubfoldersAndTheirSnippets() throws {
+        let store = try SnippetStore(url: url)
+        let work = try store.addFolder(title: "Work")
+        let email = try store.addFolder(title: "Email", parentID: work)
+        try store.addSnippet(folderID: email, title: "sig", content: "x")
+        try store.deleteFolder(id: work)
+        XCTAssertEqual(try store.folders(), [])
+        XCTAssertEqual(try store.snippetCount(), 0)
+    }
+
+    func testAnOldDatabaseWithoutParentsOpensAsTopLevel() throws {
+        let db = try SQLiteDatabase(url: url)
+        try db.exec("""
+            CREATE TABLE snippet_folders (id INTEGER PRIMARY KEY, title TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, position INTEGER NOT NULL);
+            INSERT INTO snippet_folders (title, position) VALUES ('Old', 0);
+            """)
+        let store = try SnippetStore(url: url)
+        XCTAssertNil(try store.folders().first?.parentID)
+        let sub = try store.addFolder(title: "New", parentID: try store.folders()[0].id)
+        XCTAssertEqual(try store.folders().last?.id, sub)
+    }
+
+    func testMenuSummariesNestEnabledSubfoldersAndHideThemWithTheirParent() throws {
+        let store = try SnippetStore(url: url)
+        let work = try store.addFolder(title: "Work")
+        let on = try store.addFolder(title: "On", parentID: work)
+        let off = try store.addFolder(title: "Off", enabled: false, parentID: work)
+        try store.addSnippet(folderID: work, title: "top", content: "1")
+        try store.addSnippet(folderID: on, title: "in", content: "2")
+        try store.addSnippet(folderID: off, title: "hidden", content: "3")
+
+        let summaries = try store.menuSummaries()
+        XCTAssertEqual(summaries.map(\.title), ["Work"])
+        XCTAssertEqual(summaries[0].snippets.map(\.title), ["top"])
+        XCTAssertEqual(summaries[0].subfolders.map(\.title), ["On"])
+        XCTAssertEqual(summaries[0].subfolders[0].snippets.map(\.title), ["in"])
+
+        try store.updateFolder(id: work, title: "Work", enabled: false)
+        XCTAssertEqual(try store.menuSummaries(), [])
+    }
+
+    func testImportKeepsParentsAndTreatsAnUnknownParentAsTopLevel() throws {
+        let store = try SnippetStore(url: url)
+        // The child comes first on purpose: the parent must still be made before it.
+        let counts = try store.importFolders([
+            ImportedFolder(title: "Email", enabled: true, snippets: [ImportedSnippet(title: "sig", content: "x", enabled: true)], parent: "Work"),
+            ImportedFolder(title: "Work", enabled: true, snippets: []),
+            ImportedFolder(title: "Lost", enabled: true, snippets: [], parent: "Missing"),
+        ])
+        XCTAssertEqual(counts, ImportCounts(folders: 3, snippets: 1))
+        let folders = try store.folders()
+        let work = try XCTUnwrap(folders.first { $0.title == "Work" })
+        XCTAssertEqual(folders.first { $0.title == "Email" }?.parentID, work.id)
+        XCTAssertNil(folders.first { $0.title == "Lost" }?.parentID)
+    }
+
+    func testMergeMatchesASubfolderByParentAndTitle() throws {
+        let store = try SnippetStore(url: url)
+        let incoming = [
+            ImportedFolder(title: "Work", enabled: true, snippets: []),
+            ImportedFolder(title: "Email", enabled: true, snippets: [ImportedSnippet(title: "sig", content: "x", enabled: true)], parent: "Work"),
+            ImportedFolder(title: "Email", enabled: true, snippets: [ImportedSnippet(title: "sig", content: "x", enabled: true)]),
+        ]
+        XCTAssertEqual(try store.mergeFolders(incoming), ImportCounts(folders: 3, snippets: 2), "Work/Email and a top-level Email are different")
+        XCTAssertEqual(try store.mergeFolders(incoming), ImportCounts(folders: 0, snippets: 0))
+    }
+}

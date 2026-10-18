@@ -43,6 +43,8 @@ public enum SnippetSync {
     }
 
     private struct Folder: Codable {
+        /// Title of the top-level folder this one sits in; absent in snapshots from before subfolders.
+        var parent: String?
         var title: String
         var enabled: Bool
         var snippets: [Snippet]
@@ -63,8 +65,10 @@ public enum SnippetSync {
 
     public static func snapshot(of snippets: SnippetStore, device: String, date: Date = Date()) throws -> (data: Data, skipped: Int, count: Int) {
         var skipped = 0, count = 0
-        let folders = try snippets.folders().map { folder in
-            Folder(title: folder.title, enabled: folder.enabled, snippets: folder.snippets.compactMap { snippet -> Snippet? in
+        let all = try snippets.folders()
+        let titles = Dictionary(all.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first })
+        let folders = all.map { folder in
+            Folder(parent: folder.parentID.flatMap { titles[$0] }, title: folder.title, enabled: folder.enabled, snippets: folder.snippets.compactMap { snippet -> Snippet? in
                 if snippet.secret == nil, snippet.requiresAuth { skipped += 1; return nil }
                 count += 1
                 return Snippet(title: snippet.title,
@@ -100,7 +104,7 @@ public enum SnippetSync {
                 if secret == nil, snippet.requiresAuth == true { return nil }
                 return ImportedSnippet(title: snippet.title, content: secret == nil ? snippet.content ?? "" : "",
                                        enabled: snippet.enabled, secret: secret, requiresAuth: snippet.requiresAuth ?? false)
-            })
+            }, parent: folder.parent)
         })
     }
 

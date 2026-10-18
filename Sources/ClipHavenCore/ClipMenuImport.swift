@@ -21,11 +21,14 @@ public struct ImportedFolder: Equatable, Sendable {
     public let title: String
     public let enabled: Bool
     public let snippets: [ImportedSnippet]
+    /// Title of the top-level folder this one goes inside; nil for a top-level folder.
+    public let parent: String?
 
-    public init(title: String, enabled: Bool, snippets: [ImportedSnippet]) {
+    public init(title: String, enabled: Bool, snippets: [ImportedSnippet], parent: String? = nil) {
         self.title = title
         self.enabled = enabled
         self.snippets = snippets
+        self.parent = parent
     }
 }
 

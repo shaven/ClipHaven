@@ -113,6 +113,21 @@ final class MenuController: NSObject, NSMenuDelegate {
                 items.forEach { submenu.addItem(menuItem($0, types: types)) }
                 folder.submenu = submenu
                 menu.addItem(folder)
+            case .folderWithSubfolders(let title, let items, let subfolders):
+                let folder = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                if appearance.showIcons { folder.image = icons.image(.folder) }
+                let submenu = NSMenu(title: title)
+                for sub in subfolders {
+                    let subItem = NSMenuItem(title: sub.title, action: nil, keyEquivalent: "")
+                    if appearance.showIcons { subItem.image = icons.image(.folder) }
+                    let inner = NSMenu(title: sub.title)
+                    sub.items.forEach { inner.addItem(menuItem($0, types: types)) }
+                    subItem.submenu = inner
+                    submenu.addItem(subItem)
+                }
+                items.forEach { submenu.addItem(menuItem($0, types: types)) }
+                folder.submenu = submenu
+                menu.addItem(folder)
             case .separator:
                 menu.addItem(.separator())
             }

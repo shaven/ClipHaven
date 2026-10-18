@@ -98,4 +98,24 @@ final class ExportTests: SecretTestCase {
         XCTAssertEqual(try cleanHistory.count(), 0)
         XCTAssertEqual(try cleanSnippets.folderCount(), 0)
     }
+
+    func testSubfoldersSurviveAnExportAndAnOldFileReadsAsTopLevel() throws {
+        let work = try snippets.addFolder(title: "Work")
+        let email = try snippets.addFolder(title: "Email", parentID: work)
+        try snippets.addSnippet(folderID: email, title: "sig", content: "Regards")
+        let data = try Export.data(history: history, snippets: snippets)
+        _ = try Export.restore(data, history: cleanHistory, snippets: cleanSnippets)
+        let restored = try cleanSnippets.folders()
+        let newWork = try XCTUnwrap(restored.first { $0.title == "Work" })
+        XCTAssertEqual(restored.first { $0.title == "Email" }?.parentID, newWork.id)
+        XCTAssertEqual(restored.first { $0.title == "Email" }?.snippets.map(\.title), ["sig"])
+
+        // A file written before subfolders existed has no "parent" key at all.
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object["folders"] = (object["folders"] as? [[String: Any]])?.map { $0.filter { $0.key != "parent" } }
+        let old = try JSONSerialization.data(withJSONObject: object)
+        let fresh = try SnippetStore(url: cleanDir.appendingPathComponent("old.sqlite"))
+        _ = try Export.restore(old, history: try HistoryStore(url: cleanDir.appendingPathComponent("old.sqlite")), snippets: fresh)
+        XCTAssertTrue(try fresh.folders().allSatisfy { $0.parentID == nil })
+    }
 }

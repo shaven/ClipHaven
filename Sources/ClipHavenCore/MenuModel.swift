@@ -34,7 +34,19 @@ public struct MenuItemEntry: Equatable, Sendable {
 public enum MenuEntry: Equatable, Sendable {
     case item(MenuItemEntry)
     case folder(title: String, items: [MenuItemEntry])
+    /// A snippet folder that holds subfolders; they are listed above its own snippets.
+    case folderWithSubfolders(title: String, items: [MenuItemEntry], subfolders: [MenuSubfolder])
     case separator
+}
+
+public struct MenuSubfolder: Equatable, Sendable {
+    public let title: String
+    public let items: [MenuItemEntry]
+
+    public init(title: String, items: [MenuItemEntry]) {
+        self.title = title
+        self.items = items
+    }
 }
 
 /// A snippet as the menu needs it; the snippet store supplies these.
@@ -54,10 +66,12 @@ public struct SnippetSummary: Equatable, Sendable {
 public struct SnippetFolderSummary: Equatable, Sendable {
     public let title: String
     public let snippets: [SnippetSummary]
+    public let subfolders: [SnippetFolderSummary]
 
-    public init(title: String, snippets: [SnippetSummary]) {
+    public init(title: String, snippets: [SnippetSummary], subfolders: [SnippetFolderSummary] = []) {
         self.title = title
         self.snippets = snippets
+        self.subfolders = subfolders
     }
 }
 
@@ -65,9 +79,14 @@ public struct SnippetFolderSummary: Equatable, Sendable {
 /// older ones in folders titled by their position ("21 - 45"), each numbered from 1 again.
 public enum MenuModel {
     public static func build(clips: [ClipSummary], snippetFolders: [SnippetFolderSummary], layout: MenuLayout) -> [MenuEntry] {
+        func snippetItems(_ folder: SnippetFolderSummary) -> [MenuItemEntry] {
+            folder.snippets.map { MenuItemEntry(target: .snippet($0.id), title: trim($0.title, to: layout.titleLength), isLocked: $0.isLocked) }
+        }
         var entries: [MenuEntry] = snippetFolders.map { folder in
-            .folder(title: trim(folder.title, to: layout.titleLength),
-                    items: folder.snippets.map { MenuItemEntry(target: .snippet($0.id), title: trim($0.title, to: layout.titleLength), isLocked: $0.isLocked) })
+            let title = trim(folder.title, to: layout.titleLength)
+            if folder.subfolders.isEmpty { return .folder(title: title, items: snippetItems(folder)) }
+            return .folderWithSubfolders(title: title, items: snippetItems(folder),
+                                         subfolders: folder.subfolders.map { MenuSubfolder(title: trim($0.title, to: layout.titleLength), items: snippetItems($0)) })
         }
         if !entries.isEmpty, !clips.isEmpty { entries.append(.separator) }
 

@@ -166,9 +166,12 @@ public final class SecretPaster {
     @discardableResult
     public func deleteFolder(id: Int64, removingKeychainItems: Bool) throws -> Int {
         var removed = 0
-        if removingKeychainItems, let folder = try snippets.folders().first(where: { $0.id == id }) {
-            for snippet in folder.snippets where snippet.secret != nil {
-                if try deleteSnippet(id: snippet.id, removingKeychainItem: true) { removed += 1 }
+        if removingKeychainItems {
+            // Deleting a folder deletes its subfolders too, so their Keychain items go with it.
+            for folder in try snippets.folders() where folder.id == id || folder.parentID == id {
+                for snippet in folder.snippets where snippet.secret != nil {
+                    if try deleteSnippet(id: snippet.id, removingKeychainItem: true) { removed += 1 }
+                }
             }
         }
         try snippets.deleteFolder(id: id)

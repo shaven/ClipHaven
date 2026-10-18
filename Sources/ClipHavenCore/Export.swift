@@ -42,6 +42,8 @@ public enum Export {
     }
 
     private struct Folder: Codable {
+        /// Title of the top-level folder this one sits in; absent in files from before subfolders.
+        var parent: String?
         var title: String
         var enabled: Bool
         var snippets: [Snippet]
@@ -65,8 +67,10 @@ public enum Export {
             Clip(title: clip.title, created: clip.created,
                  representations: clip.representations.map { Rep(type: $0.type, data: $0.data) })
         }
-        let folders = try snippets.folders().map { folder in
-            Folder(title: folder.title, enabled: folder.enabled, snippets: folder.snippets.map { snippet in
+        let all = try snippets.folders()
+        let titles = Dictionary(all.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first })
+        let folders = all.map { folder in
+            Folder(parent: folder.parentID.flatMap { titles[$0] }, title: folder.title, enabled: folder.enabled, snippets: folder.snippets.map { snippet in
                 Snippet(title: snippet.title, enabled: snippet.enabled, requiresAuth: snippet.requiresAuth,
                         content: snippet.secret == nil ? snippet.content : nil,
                         keychain: snippet.secret.map { Keychain(service: $0.service, account: $0.account) })
@@ -102,7 +106,7 @@ public enum Export {
                 ImportedSnippet(title: snippet.title, content: snippet.content ?? "", enabled: snippet.enabled,
                                 secret: snippet.keychain.map { SecretRef(service: $0.service, account: $0.account) },
                                 requiresAuth: snippet.requiresAuth)
-            })
+            }, parent: folder.parent)
         })
         return ExportCounts(clips: clipCount, folders: counts.folders, snippets: counts.snippets)
     }

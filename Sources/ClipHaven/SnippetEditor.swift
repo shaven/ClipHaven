@@ -8,7 +8,10 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
     private let store: SnippetStore
     private let secrets: SecretPaster
     private let onChange: () -> Void
+    /// Every folder in store order; `rows` is the same list arranged for display.
     private var folders: [SnippetFolder] = []
+    /// Each top-level folder followed by its subfolders.
+    private var rows: [SnippetFolder] = []
     private var selectedFolderID: Int64?
     private var selectedSnippetID: Int64?
 
@@ -87,7 +90,8 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
         contentScroll.setContentHuggingPriority(.defaultLow, for: .vertical)
 
         let panes = NSStackView(views: [
-            pane(folderTable, add: #selector(addFolder), remove: #selector(deleteFolder), up: #selector(moveFolderUp), down: #selector(moveFolderDown)),
+            pane(folderTable, add: #selector(addFolder), remove: #selector(deleteFolder), up: #selector(moveFolderUp), down: #selector(moveFolderDown),
+                 extra: [("+ Sub", #selector(addSubfolder)), ("In", #selector(indentFolder)), ("Out", #selector(outdentFolder))]),
             pane(snippetTable, add: #selector(addSnippet), remove: #selector(deleteSnippet), up: #selector(moveSnippetUp), down: #selector(moveSnippetDown)),
             rightColumn,
         ])
@@ -121,7 +125,8 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
         table.allowsEmptySelection = true
     }
 
-    private func pane(_ table: NSTableView, add: Selector, remove: Selector, up: Selector, down: Selector) -> NSView {
+    private func pane(_ table: NSTableView, add: Selector, remove: Selector, up: Selector, down: Selector,
+                      extra: [(String, Selector)] = []) -> NSView {
         let scroll = NSScrollView()
         scroll.documentView = table
         scroll.hasVerticalScroller = true
@@ -132,7 +137,8 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
             b.bezelStyle = .smallSquare
             return b
         }
-        let buttons = NSStackView(views: [button("+", add), button("−", remove), button("▲", up), button("▼", down)])
+        let buttons = NSStackView(views: [button("+", add), button("−", remove), button("▲", up), button("▼", down)]
+                                  + extra.map { button($0.0, $0.1) })
         buttons.spacing = 4
         let column = NSStackView(views: [scroll, buttons])
         column.orientation = .vertical
@@ -151,15 +157,22 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
     // MARK: - Data
 
     private var selectedFolder: SnippetFolder? { folders.first { $0.id == selectedFolderID } }
+
+    private static let subfolderMark = "↳ "
+
+    private func arranged(_ all: [SnippetFolder]) -> [SnippetFolder] {
+        all.filter { $0.parentID == nil }.flatMap { top in [top] + all.filter { $0.parentID == top.id } }
+    }
     private var snippets: [Snippet] { selectedFolder?.snippets ?? [] }
 
     private func reload() {
         folders = (try? store.folders()) ?? []
-        if selectedFolder == nil { selectedFolderID = folders.first?.id }
+        rows = arranged(folders)
+        if selectedFolder == nil { selectedFolderID = rows.first?.id }
         if !snippets.contains(where: { $0.id == selectedSnippetID }) { selectedSnippetID = snippets.first?.id }
         folderTable.reloadData()
         snippetTable.reloadData()
-        select(folderTable, row: folders.firstIndex { $0.id == selectedFolderID })
+        select(folderTable, row: rows.firstIndex { $0.id == selectedFolderID })
         select(snippetTable, row: snippets.firstIndex { $0.id == selectedSnippetID })
         showContent()
     }
@@ -194,6 +207,7 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
               snippet.content != contentView.string else { return }
         try? store.updateSnippet(id: snippet.id, title: snippet.title, content: contentView.string, enabled: snippet.enabled)
         folders = (try? store.folders()) ?? folders
+        rows = arranged(folders)
     }
 
     func textDidChange(_ notification: Notification) {
@@ -203,14 +217,14 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
     // MARK: - Tables
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        tableView === folderTable ? folders.count : snippets.count
+        tableView === folderTable ? rows.count : snippets.count
     }
 
     func tableView(_ tableView: NSTableView, objectValueFor column: NSTableColumn?, row: Int) -> Any? {
         let isOn = column?.identifier.rawValue == "enabled"
         if tableView === folderTable {
-            guard folders.indices.contains(row) else { return nil }
-            return isOn ? folders[row].enabled : folders[row].title
+            guard rows.indices.contains(row) else { return nil }
+            return isOn ? rows[row].enabled : (rows[row].parentID == nil ? "" : Self.subfolderMark) + rows[row].title
         }
         guard snippets.indices.contains(row) else { return nil }
         return isOn ? snippets[row].enabled : snippets[row].title
@@ -218,9 +232,10 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
 
     func tableView(_ tableView: NSTableView, setObjectValue value: Any?, for column: NSTableColumn?, row: Int) {
         let isOn = column?.identifier.rawValue == "enabled"
-        if tableView === folderTable, folders.indices.contains(row) {
-            let folder = folders[row]
-            try? store.updateFolder(id: folder.id, title: isOn ? folder.title : (value as? String ?? folder.title),
+        if tableView === folderTable, rows.indices.contains(row) {
+            let folder = rows[row]
+            let typed = (value as? String).map { $0.hasPrefix(Self.subfolderMark) ? String($0.dropFirst(Self.subfolderMark.count)) : $0 }
+            try? store.updateFolder(id: folder.id, title: isOn ? folder.title : (typed ?? folder.title),
                                     enabled: isOn ? Self.flag(value, else: folder.enabled) : folder.enabled)
         } else if tableView === snippetTable, snippets.indices.contains(row) {
             let snippet = snippets[row]
@@ -240,7 +255,7 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
         guard let table = notification.object as? NSTableView else { return }
         saveContent()
         if table === folderTable {
-            selectedFolderID = folders.indices.contains(folderTable.selectedRow) ? folders[folderTable.selectedRow].id : nil
+            selectedFolderID = rows.indices.contains(folderTable.selectedRow) ? rows[folderTable.selectedRow].id : nil
             selectedSnippetID = snippets.first?.id
             snippetTable.reloadData()
             select(snippetTable, row: snippets.isEmpty ? nil : 0)
@@ -262,11 +277,12 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
 
     @objc private func deleteFolder() {
         guard let id = selectedFolderID, let folder = selectedFolder else { return }
-        let keychainCount = folder.snippets.filter { $0.secret != nil }.count
+        let subfolders = folders.filter { $0.parentID == id }
+        let keychainCount = ([folder] + subfolders).flatMap(\.snippets).filter { $0.secret != nil }.count
         var removeItems = false
         if keychainCount > 0 {
             switch askAboutKeychain(message: "Delete “\(folder.title)”?",
-                                    detail: "\(keychainCount) snippet(s) in this folder are stored in the Keychain. Delete those Keychain items too?") {
+                                    detail: "\(keychainCount) snippet(s) in this folder\(subfolders.isEmpty ? "" : " and its subfolders") are stored in the Keychain. Delete those Keychain items too?") {
             case .cancel: return
             case .snippetAndItem: removeItems = true
             case .snippetOnly: break
@@ -417,11 +433,38 @@ final class SnippetEditor: NSObject, NSWindowDelegate, NSTableViewDataSource, NS
     @objc private func moveSnippetDown() { moveSnippet(by: 1) }
 
     private func moveFolder(by offset: Int) {
-        guard let id = selectedFolderID, let from = folders.firstIndex(where: { $0.id == id }),
-              folders.indices.contains(from + offset) else { return }
+        guard let id = selectedFolderID, let folder = selectedFolder else { return }
+        let siblings = folders.filter { $0.parentID == folder.parentID }.map(\.id)
+        guard let from = siblings.firstIndex(of: id), siblings.indices.contains(from + offset) else { return }
         var ids = folders.map(\.id)
-        ids.swapAt(from, from + offset)
+        guard let a = ids.firstIndex(of: id), let b = ids.firstIndex(of: siblings[from + offset]) else { return }
+        ids.swapAt(a, b)
         try? store.reorderFolders(ids)
+        changed()
+    }
+
+    /// A new folder inside the selected one (or inside the selected subfolder's parent).
+    @objc private func addSubfolder() {
+        guard let folder = selectedFolder else { return }
+        saveContent()
+        selectedFolderID = try? store.addFolder(title: "untitled folder", parentID: folder.parentID ?? folder.id)
+        selectedSnippetID = nil
+        changed()
+        rename(folderTable)
+    }
+
+    /// Moves the selected folder inside the top-level folder above it.
+    @objc private func indentFolder() {
+        guard let id = selectedFolderID, let folder = selectedFolder, folder.parentID == nil,
+              let index = folders.filter({ $0.parentID == nil }).firstIndex(where: { $0.id == id }), index > 0 else { return }
+        let above = folders.filter { $0.parentID == nil }[index - 1]
+        do { try store.moveFolder(id: id, under: above.id) } catch { showError("Could not move the folder", "\(error)") }
+        changed()
+    }
+
+    @objc private func outdentFolder() {
+        guard let id = selectedFolderID, selectedFolder?.parentID != nil else { return }
+        try? store.moveFolder(id: id, under: nil)
         changed()
     }
 

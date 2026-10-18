@@ -11,7 +11,7 @@ public struct SQLiteError: Error, CustomStringConvertible {
 /// own, so they share the file and not a lock.
 final class SQLiteDatabase {
     enum Value {
-        case int(Int64), double(Double), text(String), blob(Data)
+        case int(Int64), double(Double), text(String), blob(Data), null
     }
 
     private var db: OpaquePointer?
@@ -71,6 +71,7 @@ final class SQLiteDatabase {
             let index = Int32(i + 1)
             switch value {
             case .int(let v): sqlite3_bind_int64(stmt, index, v)
+            case .null: sqlite3_bind_null(stmt, index)
             case .double(let v): sqlite3_bind_double(stmt, index, v)
             case .text(let v): sqlite3_bind_text(stmt, index, v, -1, transient)
             case .blob(let v):

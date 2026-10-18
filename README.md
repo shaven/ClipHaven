@@ -89,3 +89,9 @@ are not removed with it.
 
 Untick Start at login, quit ClipHaven, delete `/Applications/ClipHaven.app`, and optionally the
 data folder above.
+
+## Credits
+
+ClipHaven is based on [ClipMenu](https://github.com/naotaka/ClipMenu) by Naotaka Morimoto (MIT licence;
+the licence text is in `Resources/script/LICENSE-ClipMenu.txt`). The app icon is ClipMenu's clipboard
+with a red "CH" added, and the JavaScript actions are ClipMenu's.

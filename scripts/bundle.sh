@@ -15,15 +15,13 @@ cp -R Resources/script "$app/Contents/Resources/script"
 cp -R Resources/StatusIcons "$app/Contents/Resources/StatusIcons"
 cp -R Resources/Help "$app/Contents/Resources/Help"
 cp "$(swift build -c release --arch arm64 --show-bin-path)/ClipHaven" "$app/Contents/MacOS/ClipHaven"
-# The app icon is drawn by the app itself. Xcode's actool turns the drawn artwork (Resources/AppIcon.icon
-# holds the recipe) into the layered icon macOS Tahoe expects, so it is not boxed in a grey tile.
+# The app icon is ClipMenu's own clipboard (MIT-licensed, see Resources/script/LICENSE-ClipMenu.txt) with a red
+# "CH" added: Resources/AppIcon.icon holds the artwork. Xcode's actool turns it into the layered icon macOS Tahoe expects, so it is not boxed in a grey tile.
 # Without Xcode, a plain .icns made from the same drawing is used instead.
 icon_work="$(mktemp -d)"
 icon_src="$icon_work/AppIcon.icon"
 mkdir -p "$icon_work/out"
 cp -R Resources/AppIcon.icon "$icon_src"
-mkdir -p "$icon_src/Assets"
-"$app/Contents/MacOS/ClipHaven" --write-icon "$icon_src/Assets/layer.png" 1024 layer
 if xcrun --find actool >/dev/null 2>&1 && xcrun actool "$icon_src" --compile "$icon_work/out" --platform macosx \
         --minimum-deployment-target 14.0 --app-icon AppIcon --output-partial-info-plist "$icon_work/partial.plist" >/dev/null 2>&1; then
     cp "$icon_work/out/Assets.car" "$icon_work/out/AppIcon.icns" "$app/Contents/Resources/"
@@ -32,8 +30,8 @@ else
     iconset="$icon_work/AppIcon.iconset"
     mkdir -p "$iconset"
     for size in 16 32 128 256 512; do
-        "$app/Contents/MacOS/ClipHaven" --write-icon "$iconset/icon_${size}x${size}.png" "$size" app
-        "$app/Contents/MacOS/ClipHaven" --write-icon "$iconset/icon_${size}x${size}@2x.png" "$((size * 2))" app
+        sips -z "$size" "$size" "$icon_src/Assets/layer.png" --out "$iconset/icon_${size}x${size}.png" >/dev/null
+        sips -z "$((size * 2))" "$((size * 2))" "$icon_src/Assets/layer.png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
     done
     iconutil -c icns "$iconset" -o "$app/Contents/Resources/AppIcon.icns"
 fi

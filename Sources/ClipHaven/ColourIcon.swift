@@ -1,8 +1,8 @@
 import AppKit
 
-/// ClipHaven's icon, used for the menu bar and the app: the original outlined clipboard with its
-/// clip on top, a bold red "CH" at the top of the board and a few lines of text below it. Drawn
-/// in code, so it stays sharp at every size.
+/// ClipHaven's small icon, for the menu bar: the outlined clipboard with its clip on top, a bold red
+/// "CH" at the top of the board and a few lines of text below it. Drawn in code, so it stays sharp.
+/// The large app icon is ClipMenu's own artwork with the "CH" added (Resources/AppIcon.icon).
 enum ColourIcon {
     private static let red = NSColor(srgbRed: 0xE3 / 255, green: 0x14 / 255, blue: 0x1F / 255, alpha: 1)
 
@@ -18,90 +18,17 @@ enum ColourIcon {
         return image
     }
 
-    /// A square PNG of `pixels`. The app icon sits on macOS's usual light rounded tile, with a
-    /// margin around it; the plain one is the mark alone.
-    enum Style { case mark, tile, layer }
-
-    static func png(pixels: Int, style: Style) -> Data? {
+    /// A square PNG of `pixels` of the small mark, for previews.
+    static func png(pixels: Int) -> Data? {
         guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels, bitsPerSample: 8,
                                          samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
                                          bytesPerRow: 0, bitsPerPixel: 0),
               let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
-        let side = CGFloat(pixels)
-        let full = NSRect(x: 0, y: 0, width: side, height: side)
-        switch style {
-        case .mark:
-            drawMark(in: full, ink: .black)
-        case .layer:
-            // Artwork only, on a transparent square; the system supplies the tile and its gloss.
-            drawRich(in: full.insetBy(dx: side * 0.13, dy: side * 0.1))
-        case .tile:
-            // For the plain `.icns`, which older macOS shows as it is: the tile and the artwork.
-            let art = full.insetBy(dx: side * 0.0977, dy: side * 0.0977)
-            let tile = NSBezierPath(roundedRect: art, xRadius: art.width * 0.2237, yRadius: art.width * 0.2237)
-            NSGradient(starting: .white, ending: NSColor(srgbRed: 0.84, green: 0.85, blue: 0.87, alpha: 1))?.draw(in: tile, angle: -90)
-            drawRich(in: art.insetBy(dx: art.width * 0.15, dy: art.width * 0.1))
-        }
+        drawMark(in: NSRect(x: 0, y: 0, width: pixels, height: pixels), ink: .black)
         NSGraphicsContext.restoreGraphicsState()
         return rep.representation(using: .png, properties: [:])
-    }
-
-    private static func hex(_ value: UInt32) -> NSColor {
-        NSColor(srgbRed: CGFloat((value >> 16) & 0xFF) / 255, green: CGFloat((value >> 8) & 0xFF) / 255,
-                blue: CGFloat(value & 0xFF) / 255, alpha: 1)
-    }
-
-    /// The full-size artwork, coloured like ClipMenu's clipboard: a dark brown board, white paper
-    /// and a silver clip, with a bold red "CH" at the top of the paper and text lines below it.
-    /// `rect` is the area it fills.
-    private static func drawRich(in rect: NSRect) {
-        let w = rect.width, h = rect.height
-        func r(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) -> NSRect {
-            NSRect(x: rect.minX + x * w, y: rect.minY + y * h, width: width * w, height: height * h)
-        }
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
-        shadow.shadowBlurRadius = w * 0.035
-        shadow.shadowOffset = NSSize(width: 0, height: -w * 0.02)
-
-        // Board.
-        NSGraphicsContext.saveGraphicsState()
-        shadow.set()
-        let board = NSBezierPath(roundedRect: r(0, 0, 1, 0.9), xRadius: w * 0.09, yRadius: w * 0.09)
-        NSGradient(starting: hex(0x6A4A33), ending: hex(0x35241A))?.draw(in: board, angle: -90)
-        NSGraphicsContext.restoreGraphicsState()
-
-        // Paper.
-        let paper = NSBezierPath(roundedRect: r(0.09, 0.07, 0.82, 0.69), xRadius: w * 0.04, yRadius: w * 0.04)
-        NSGradient(starting: .white, ending: hex(0xE4E4E6))?.draw(in: paper, angle: -90)
-
-        // "CH" across the top of the paper.
-        let text = NSAttributedString(string: "CH", attributes: [
-            .font: NSFont.systemFont(ofSize: w * 0.46, weight: .black),
-            .foregroundColor: hex(0xE3141F),
-            .kern: w * 0.008])
-        let size = text.size()
-        text.draw(at: NSPoint(x: rect.midX - size.width / 2, y: rect.minY + h * 0.50 - size.height / 2 + h * 0.02))
-
-        // Text lines, moved down.
-        hex(0x3B3F46).setFill()
-        for (y, width) in [(0.27, 0.62), (0.185, 0.62), (0.10, 0.40)] as [(CGFloat, CGFloat)] {
-            NSBezierPath(roundedRect: r(0.19, y, width, 0.045), xRadius: w * 0.02, yRadius: w * 0.02).fill()
-        }
-
-        // Clip.
-        NSGraphicsContext.saveGraphicsState()
-        shadow.set()
-        let clip = NSBezierPath(roundedRect: r(0.30, 0.82, 0.40, 0.18), xRadius: w * 0.05, yRadius: w * 0.05)
-        NSGradient(starting: hex(0xF1F2F4), ending: hex(0x9298A3))?.draw(in: clip, angle: -90)
-        NSGraphicsContext.restoreGraphicsState()
-        hex(0x5C626D).setStroke()
-        clip.lineWidth = w * 0.008
-        clip.stroke()
-        hex(0x35241A).setFill()
-        NSBezierPath(ovalIn: r(0.44, 0.905, 0.12, 0.055)).fill()
     }
 
     /// Draws on an 18-point grid fitted into `rect`.

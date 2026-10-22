@@ -28,6 +28,13 @@ final class MenuController: NSObject, NSMenuDelegate {
     private let secrets: SecretProvider
     private let clicks = ActionClickTracker()
     private weak var statusMenu: NSMenu?
+    /// Remembered between openings and launches.
+    private var searchScope = SearchScope(rawValue: UserDefaults.standard.integer(forKey: "searchScope")) ?? .all {
+        didSet { UserDefaults.standard.set(searchScope.rawValue, forKey: "searchScope") }
+    }
+    private let preview = PreviewPanel()
+    private let watcher = HighlightWatcher()
+    private var previewTask: Task<Void, Never>?
     /// Set when the menu was opened with Control-right-click: choosing a clip opens its actions.
     private var actionMode = false
     var appearance: MenuAppearance {
@@ -52,6 +59,8 @@ final class MenuController: NSObject, NSMenuDelegate {
         self.snippets = snippets
         self.paster = paster
         self.secretPaster = secretPaster
+        super.init()
+        watcher.onHighlight = { [unowned self] in highlighted($0) }
     }
 
     /// The status item's menu; rebuilt each time it opens.
@@ -73,7 +82,12 @@ final class MenuController: NSObject, NSMenuDelegate {
         clicks.start()
     }
 
+    func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
+        highlighted(item)
+    }
+
     func menuDidClose(_ menu: NSMenu) {
+        hidePreview()
         // The chosen item's action runs just after the menu closes, so sampling stops later.
         clicks.stop(after: 0.6)
     }
@@ -89,6 +103,21 @@ final class MenuController: NSObject, NSMenuDelegate {
     }
 
     private func fill(_ menu: NSMenu) {
+        let field = MenuSearchField(frame: .zero)
+        field.scope = searchScope
+        field.onChange = { [unowned self, unowned menu] in search($0, scope: searchScope, in: menu) }
+        field.onScope = { [unowned self, unowned menu, unowned field] in
+            searchScope = $0
+            search(field.text, scope: $0, in: menu)
+        }
+        field.onReturn = { [unowned self, unowned menu] in chooseFirstMatch(in: menu) }
+        let fieldItem = NSMenuItem()
+        fieldItem.view = field
+        menu.addItem(fieldItem)
+        fillBody(menu)
+    }
+
+    private func fillBody(_ menu: NSMenu) {
         let clips = (try? store.summaries(limit: store.limits.maxCount)) ?? []
         let types = Dictionary(clips.map { ($0.id, $0.primaryType) }, uniquingKeysWith: { a, _ in a })
         let snippetFolders = (try? snippets.menuSummaries()) ?? []
@@ -109,19 +138,21 @@ final class MenuController: NSObject, NSMenuDelegate {
             case .folder(let title, let items):
                 let folder = NSMenuItem(title: title, action: nil, keyEquivalent: "")
                 if appearance.showIcons { folder.image = icons.image(.folder) }
-                let submenu = NSMenu(title: title)
+                let submenu = makeSubmenu(title)
                 items.forEach { submenu.addItem(menuItem($0, types: types)) }
+                addEmptyNote(to: submenu)
                 folder.submenu = submenu
                 menu.addItem(folder)
             case .folderWithSubfolders(let title, let items, let subfolders):
                 let folder = NSMenuItem(title: title, action: nil, keyEquivalent: "")
                 if appearance.showIcons { folder.image = icons.image(.folder) }
-                let submenu = NSMenu(title: title)
+                let submenu = makeSubmenu(title)
                 for sub in subfolders {
                     let subItem = NSMenuItem(title: sub.title, action: nil, keyEquivalent: "")
                     if appearance.showIcons { subItem.image = icons.image(.folder) }
-                    let inner = NSMenu(title: sub.title)
+                    let inner = makeSubmenu(sub.title)
                     sub.items.forEach { inner.addItem(menuItem($0, types: types)) }
+                    addEmptyNote(to: inner)
                     subItem.submenu = inner
                     submenu.addItem(subItem)
                 }
@@ -166,6 +197,20 @@ final class MenuController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "Quit ClipHaven", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
+    /// macOS will not open a submenu with nothing in it, so an empty folder says so.
+    private func addEmptyNote(to submenu: NSMenu) {
+        guard submenu.numberOfItems == 0 else { return }
+        let note = NSMenuItem(title: "(empty)", action: nil, keyEquivalent: "")
+        note.isEnabled = false
+        submenu.addItem(note)
+    }
+
+    private func makeSubmenu(_ title: String) -> NSMenu {
+        let submenu = NSMenu(title: title)
+        submenu.delegate = watcher
+        return submenu
+    }
+
     private func menuItem(_ entry: MenuItemEntry, types: [Int64: String]) -> NSMenuItem {
         let item = actionItem(entry.title, #selector(choose(_:)))
         item.representedObject = entry.target
@@ -186,6 +231,69 @@ final class MenuController: NSObject, NSMenuDelegate {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = self
         return item
+    }
+
+    // MARK: - Filtering
+
+    /// Swaps the menu's contents for the matches of `text`, each showing where it sits in the
+    /// normal menu; an empty field brings the normal menu back. The field itself stays put.
+    private func search(_ text: String, scope: SearchScope, in menu: NSMenu) {
+        while menu.numberOfItems > 1 { menu.removeItem(at: 1) }
+        let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !words.isEmpty else {
+            fillBody(menu)
+            return
+        }
+        let clips = (try? store.summaries(limit: store.limits.maxCount)) ?? []
+        let types = Dictionary(clips.map { ($0.id, $0.primaryType) }, uniquingKeysWith: { a, _ in a })
+        let found = MenuSearch.results(query: text, clips: clips, matchingClipIDs: (try? store.search(words: words, scope: scope, limit: 200)) ?? [],
+                                       snippetFolders: (try? snippets.folders()) ?? [], layout: layout, scope: scope)
+        for result in found {
+            let item = menuItem(MenuItemEntry(target: result.target, title: result.title, isLocked: result.isLocked), types: types)
+            let title = NSMutableAttributedString(string: result.title + "\n")
+            title.append(NSAttributedString(string: result.path, attributes: [.font: NSFont.menuFont(ofSize: 10), .foregroundColor: NSColor.secondaryLabelColor]))
+            item.attributedTitle = title
+            menu.addItem(item)
+        }
+        if found.isEmpty { menu.addItem(NSMenuItem(title: "No matches", action: nil, keyEquivalent: "")) }
+    }
+
+    /// Return in the filter field chooses the first match, as clicking it would.
+    private func chooseFirstMatch(in menu: NSMenu) {
+        guard let first = menu.items.dropFirst().first(where: { $0.representedObject is MenuTarget }) else { return }
+        menu.cancelTracking()
+        DispatchQueue.main.async { [self] in choose(first) }
+    }
+
+    // MARK: - Preview
+
+    private func hidePreview() {
+        previewTask?.cancel()
+        previewTask = nil
+        preview.hide()
+    }
+
+    /// Shows the hover preview for the highlighted item after a short pause, so moving down the
+    /// list does not load every clip on the way.
+    private func highlighted(_ item: NSMenuItem?) {
+        hidePreview()
+        guard let target = item?.representedObject as? MenuTarget else { return }
+        previewTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled, let self, let content = previewContent(for: target) else { return }
+            preview.show(content)
+        }
+    }
+
+    private func previewContent(for target: MenuTarget) -> PreviewContent? {
+        switch target {
+        case .clip(let id):
+            guard let clip = try? store.clip(id: id) else { return nil }
+            return ClipPreview.content(for: clip.representations)
+        case .snippet(let id):
+            guard let snippet = try? snippets.snippet(id: id) else { return nil }
+            return ClipPreview.content(for: snippet)
+        }
     }
 
     // MARK: - Choosing

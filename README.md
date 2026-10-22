@@ -21,6 +21,11 @@ and JavaScript actions, and changes these things:
 - **Right-click gestures** (a menu at the pointer in any text field) and a choice of status-bar
   icons, including a coloured one.
 - **Per-kind icons and image thumbnails** in the history menu.
+- **A filter field at the top of the menu.** Type to swap the list for matches in snippets and history, each
+  showing where it lives (for example `Snippets › Work › Login`). A switch beside it limits the search to
+  names or to contents. Locked snippets never match on their contents.
+- **Hover previews.** Rest on an item to see the start of its text, a thumbnail of an image or PDF page, or
+  the file paths. Locked snippets show only that they are locked, never the value.
 
 ClipHaven is a personal project, built with Claude Code. It is not notarized, and parts of it have
 been run only on the author's Macs: see *Status* at the end.

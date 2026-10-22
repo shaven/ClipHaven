@@ -193,6 +193,40 @@ public final class HistoryStore {
         }
     }
 
+    /// Ids of the clips whose title and/or text (per `scope`) (String, URL and Filenames types) holds every word,
+    /// newest first. Case-insensitive for plain letters; `%` and `_` in the words match literally.
+    public func search(words: [String], scope: SearchScope = .all, limit: Int) throws -> [Int64] {
+        guard !words.isEmpty else { return [] }
+        let patterns = words.map { word -> String in
+            let escaped = word.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "%", with: "\\%")
+                .replacingOccurrences(of: "_", with: "\\_")
+            return "%\(escaped)%"
+        }
+        let types = [ClipType.string, .url, .filenames].map(\.pasteboardType)
+        var values: [SQLiteDatabase.Value] = []
+        let conditions = patterns.map { pattern -> String in
+            let title = "c.title LIKE ? ESCAPE '\\'"
+            let body = """
+                EXISTS (SELECT 1 FROM representations r WHERE r.clip_id = c.id
+                 AND r.type IN (?, ?, ?) AND CAST(r.data AS TEXT) LIKE ? ESCAPE '\\')
+                """
+            switch scope {
+            case .names:
+                values.append(.text(pattern))
+                return "(\(title))"
+            case .contents:
+                values += types.map { .text($0) } + [.text(pattern)]
+                return "(\(body))"
+            case .all:
+                values += [.text(pattern)] + types.map { .text($0) } + [.text(pattern)]
+                return "(\(title) OR \(body))"
+            }
+        }
+        values.append(.int(Int64(limit)))
+        return try query("SELECT c.id FROM clips c WHERE \(conditions.joined(separator: " AND ")) ORDER BY c.seq DESC LIMIT ?",
+                         values) { sqlite3_column_int64($0, 0) }
+    }
+
     public func clip(id: Int64) throws -> StoredClip? {
         let rows = try query("SELECT title, created FROM clips WHERE id = ?", [.int(id)]) { stmt in
             (Self.text(stmt, 0), sqlite3_column_double(stmt, 1))
